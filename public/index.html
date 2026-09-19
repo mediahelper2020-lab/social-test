@@ -14,12 +14,12 @@
     <div class="badge">"AI 활용 역량 찾습니다"</div>
     <h1>사회복지 현장 AI 활용 역량 평가</h1>
     <p class="lead">
-      아동복지·노인복지·장애인복지·청소년복지·정신건강 5개 영역의 실제 현장 사례를 바탕으로,
-      AI와 대화하며 문제를 해결해 나가는 역량을 평가합니다.<br />
+      아동복지·노인복지·장애인복지·청소년복지·정신건강·장기요양기관, 응시할 영역을 선택하면
+      그 영역의 실제 현장 사례를 바탕으로 AI와 대화하며 문제를 해결해 나가는 역량을 평가합니다.<br />
       정답을 맞히는 시험이 아니라, <strong>AI를 현장 문제 해결에 얼마나 잘 활용하는가</strong>를 보는 시험입니다.
     </p>
     <ul class="info-list">
-      <li>총 5문항 · 영역별 1문항 · 제한시간 <span id="info-minutes">60</span>분</li>
+      <li>영역별 문항 구성 · 그중 1문항은 반복 문서 작성을 AI에게 맡기기 위한 <strong>맞춤 지침 설계</strong> 문항</li>
       <li>각 문항마다 오른쪽 AI 어시스트와 자유롭게 상의할 수 있습니다</li>
       <li>AI의 답변을 그대로 옮기지 말고, 현장 전문성으로 검증·보완하여 답안을 작성하세요</li>
     </ul>
@@ -30,7 +30,12 @@
       <label>소속기관 / 지원 분야
         <input type="text" id="input-org" required placeholder="예) OO지역아동센터 지원자" />
       </label>
-      <button type="submit" class="btn-primary">시험 시작하기</button>
+      <div class="field-block">
+        <span class="field-label">응시 영역 선택</span>
+        <div id="domain-picker" class="domain-picker"></div>
+        <p id="domain-hint" class="domain-hint"></p>
+      </div>
+      <button type="submit" class="btn-primary" id="btn-start" disabled>시험 시작하기</button>
     </form>
     <p id="ai-status" class="ai-status">AI 연동 상태 확인 중...</p>
   </div>
@@ -58,6 +63,7 @@
     <main class="q-main">
       <div class="q-header">
         <span id="q-domain-badge" class="domain-badge"></span>
+        <span id="q-type-badge" class="type-badge" hidden>문서 자동화 지침 설계</span>
         <h2 id="q-title"></h2>
       </div>
       <div class="q-scenario">

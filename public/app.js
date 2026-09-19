@@ -2,7 +2,10 @@
   const state = {
     sessionId: null,
     config: null,
-    questions: [],
+    allQuestions: [], // 서버에서 받은 전체 문항 (모든 영역)
+    domains: [], // [{domain, domainColor, count}]
+    selectedDomain: null,
+    questions: [], // 선택한 영역으로 필터링된 문항
     currentIndex: 0,
     name: "",
     org: "",
@@ -34,8 +37,9 @@
         fetch("/api/questions").then((r) => r.json()),
       ]);
       state.config = configRes;
-      state.questions = questionsRes.questions;
-      $("#info-minutes").textContent = state.config.examMinutes;
+      state.allQuestions = questionsRes.questions;
+      state.domains = buildDomainList(state.allQuestions);
+      renderDomainPicker();
 
       const statusEl = $("#ai-status");
       if (state.config.aiConfigured) {
@@ -51,13 +55,57 @@
     }
   }
 
+  function buildDomainList(questions) {
+    const map = new Map();
+    questions.forEach((q) => {
+      if (!map.has(q.domain)) {
+        map.set(q.domain, { domain: q.domain, domainColor: q.domainColor, count: 0 });
+      }
+      map.get(q.domain).count += 1;
+    });
+    return [...map.values()];
+  }
+
+  function renderDomainPicker() {
+    const picker = $("#domain-picker");
+    picker.innerHTML = "";
+    state.domains.forEach((d) => {
+      const card = document.createElement("div");
+      card.className = "domain-card";
+      card.textContent = d.domain;
+      card.dataset.domain = d.domain;
+      card.addEventListener("click", () => selectDomain(d.domain));
+      picker.appendChild(card);
+    });
+  }
+
+  function selectDomain(domain) {
+    state.selectedDomain = domain;
+    const info = state.domains.find((d) => d.domain === domain);
+
+    document.querySelectorAll(".domain-card").forEach((card) => {
+      const isSelected = card.dataset.domain === domain;
+      card.classList.toggle("selected", isSelected);
+      card.style.background = isSelected ? info.domainColor : "";
+      card.style.borderColor = isSelected ? info.domainColor : "";
+    });
+
+    const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
+    const totalMinutes = info.count * minutesPerQ;
+    $("#domain-hint").textContent = `${domain} · 총 ${info.count}문항 · 제한시간 약 ${totalMinutes}분`;
+
+    $("#btn-start").disabled = false;
+  }
+
   $("#start-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     state.name = $("#input-name").value.trim();
     state.org = $("#input-org").value.trim();
-    if (!state.name || !state.org) return;
+    if (!state.name || !state.org || !state.selectedDomain) return;
 
-    const btn = e.target.querySelector("button");
+    state.questions = state.allQuestions.filter((q) => q.domain === state.selectedDomain);
+
+    const btn = $("#btn-start");
     btn.disabled = true;
     btn.textContent = "준비 중...";
 
@@ -74,8 +122,9 @@
 
       renderNav();
       loadQuestion(0);
-      startTimer(state.config.examMinutes);
-      $("#candidate-info").textContent = `${state.name} · ${state.org}`;
+      const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
+      startTimer(state.questions.length * minutesPerQ);
+      $("#candidate-info").textContent = `${state.name} · ${state.org} · ${state.selectedDomain}`;
       showScreen("exam");
     } catch (err) {
       alert("세션을 시작하지 못했습니다. 다시 시도해 주세요.");
@@ -113,7 +162,7 @@
     state.questions.forEach((q, idx) => {
       const item = document.createElement("div");
       item.className = "q-nav-item";
-      item.textContent = q.id;
+      item.textContent = idx + 1;
       item.title = `${q.domain} - ${q.title}`;
       item.addEventListener("click", () => loadQuestion(idx));
       nav.appendChild(item);
@@ -140,6 +189,8 @@
 
     $("#q-domain-badge").textContent = q.domain;
     $("#q-domain-badge").style.background = q.domainColor;
+    const typeBadge = $("#q-type-badge");
+    typeBadge.hidden = q.type !== "document";
     $("#q-title").textContent = q.title;
     $("#q-scenario").textContent = q.scenario;
     $("#q-task").textContent = q.task;
@@ -307,14 +358,14 @@
       box.appendChild(notice);
     }
 
-    answers.forEach((a) => {
+    answers.forEach((a, idx) => {
       const rubric = rubricByQuestion[a.questionId];
       const div = document.createElement("div");
       div.className = "rubric-item";
       const rubricHtml = rubric
         ? `<ul>${rubric.rubric.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
         : "";
-      div.innerHTML = `<h4>${a.questionId}. [${escapeHtml(a.domain)}] ${escapeHtml(a.title)}</h4>${rubricHtml}`;
+      div.innerHTML = `<h4>${idx + 1}. [${escapeHtml(a.domain)}] ${escapeHtml(a.title)}</h4>${rubricHtml}`;
       box.appendChild(div);
     });
 
@@ -332,12 +383,13 @@
     lines.push("사회복지 현장 AI 활용 역량 평가 결과");
     lines.push(`이름: ${state.name}`);
     lines.push(`소속기관/지원분야: ${state.org}`);
+    lines.push(`응시 영역: ${state.selectedDomain}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
     lines.push("");
 
-    answers.forEach((a) => {
+    answers.forEach((a, idx) => {
       lines.push("=".repeat(60));
-      lines.push(`문항 ${a.questionId}. [${a.domain}] ${a.title}`);
+      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}`);
       lines.push("-".repeat(60));
       lines.push("[사례]");
       lines.push(a.scenario);

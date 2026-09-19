@@ -9,7 +9,8 @@ const { QUESTIONS } = require("./data/questions");
 const PORT = process.env.PORT || 3000;
 const AI_PROVIDER = process.env.AI_PROVIDER || "gemini"; // 'gemini' | 'groq'
 const MAX_AI_MESSAGES = parseInt(process.env.MAX_AI_MESSAGES || "40", 10);
-const EXAM_MINUTES = parseInt(process.env.EXAM_MINUTES || "60", 10);
+// 영역을 선택하면 그 영역의 문항 수만큼 시험 시간이 정해진다 (문항수 × 문항당 분).
+const EXAM_MINUTES_PER_QUESTION = parseInt(process.env.EXAM_MINUTES_PER_QUESTION || "12", 10);
 const MAX_MESSAGE_LENGTH = 2000;
 
 const provider = require(`./providers/${AI_PROVIDER}`);
@@ -22,10 +23,11 @@ app.use(express.static(path.join(__dirname, "public")));
 const sessions = new Map();
 
 function publicQuestions() {
-  return QUESTIONS.map(({ id, domain, domainColor, title, scenario, task }) => ({
+  return QUESTIONS.map(({ id, domain, domainColor, type, title, scenario, task }) => ({
     id,
     domain,
     domainColor,
+    type,
     title,
     scenario,
     task,
@@ -34,7 +36,7 @@ function publicQuestions() {
 
 app.get("/api/config", (req, res) => {
   res.json({
-    examMinutes: EXAM_MINUTES,
+    examMinutesPerQuestion: EXAM_MINUTES_PER_QUESTION,
     maxAiMessages: MAX_AI_MESSAGES,
     provider: AI_PROVIDER,
     aiConfigured: AI_PROVIDER === "gemini" ? !!process.env.GEMINI_API_KEY : !!process.env.GROQ_API_KEY,
