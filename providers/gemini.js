@@ -2,7 +2,7 @@
 // 무료 API 키 발급: https://aistudio.google.com/apikey (신용카드 등록 불필요)
 // 문서: https://ai.google.dev/gemini-api/docs/rate-limits (무료 티어 요청 한도 존재)
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 // history: [{ role: 'user' | 'ai', text: string }]
@@ -26,7 +26,13 @@ async function chat({ systemPrompt, history, message }) {
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents,
-      generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
+      generationConfig: {
+        temperature: 0.6,
+        maxOutputTokens: 1024,
+        // gemini-2.5 계열은 기본적으로 내부 추론(thinking)에 출력 토큰 예산을 많이 소모해
+        // 실제 답변이 중간에 잘리는 문제가 있어, 시험용 채팅 응답에서는 thinking을 끈다.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
 
@@ -36,12 +42,13 @@ async function chat({ systemPrompt, history, message }) {
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+  const candidate = data?.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p) => p.text).join("") || "";
   if (!text) {
     const blockReason = data?.promptFeedback?.blockReason;
     throw new Error(blockReason ? `응답이 차단되었습니다: ${blockReason}` : "AI로부터 빈 응답을 받았습니다.");
   }
-  return text;
+  return candidate?.finishReason === "MAX_TOKENS" ? `${text}\n\n(...응답 길이 제한으로 일부 생략됨)` : text;
 }
 
 module.exports = { chat };
