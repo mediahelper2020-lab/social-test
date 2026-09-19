@@ -1,0 +1,75 @@
+# 사회복지 현장 AI 활용 역량 평가
+
+사회복지 현장(아동복지·노인복지·장애인복지·청소년복지·정신건강) 취업 준비생을 위한
+**AI 활용 역량 평가 웹앱**입니다. 5개 영역별 실전 사례 문제를 풀면서, 오른쪽 AI 어시스트와
+실제로 대화하며 문제를 해결하는 과정을 평가합니다.
+
+## 구성
+
+- 왼쪽/가운데: 문항 사례, 과업, 최종 답안 작성, 타이머, 문항 이동
+- 오른쪽: 실제 AI와 대화할 수 있는 채팅 패널 (무료 AI API 연동)
+- 제출 후: 문항별 평가 관점(자기 점검 rubric) 확인 + 답안/대화기록 다운로드(.txt)
+
+## 1. 설치
+
+```bash
+npm install
+cp .env.example .env
+```
+
+## 2. 무료 AI API 키 발급 (택 1)
+
+카드 등록 없이 무료로 사용 가능한 두 가지 중 하나를 선택하세요.
+
+### 옵션 A. Google Gemini (기본값, 추천)
+1. https://aistudio.google.com/apikey 접속 후 구글 계정으로 로그인
+2. "Create API key" 클릭 → 키 복사
+3. `.env` 파일에 입력:
+   ```
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=발급받은키
+   ```
+- 무료 티어: 분당/일당 요청 한도가 있으나 교육/시험용으로 충분합니다.
+
+### 옵션 B. Groq (Gemini 대체용, 응답 속도 빠름)
+1. https://console.groq.com/keys 접속 후 로그인
+2. "Create API Key" → 키 복사
+3. `.env` 파일에 입력:
+   ```
+   AI_PROVIDER=groq
+   GROQ_API_KEY=발급받은키
+   ```
+
+## 3. 실행
+
+```bash
+npm start
+```
+
+브라우저에서 http://localhost:3000 접속
+
+## 4. 주요 설정 (.env)
+
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `AI_PROVIDER` | `gemini` 또는 `groq` | `gemini` |
+| `EXAM_MINUTES` | 시험 제한 시간(분) | `60` |
+| `MAX_AI_MESSAGES` | 응시자 1인당 전체 시험에서 AI에게 보낼 수 있는 최대 메시지 수 | `40` |
+| `PORT` | 서버 포트 | `3000` |
+
+## 5. 문항 수정/추가
+
+`data/questions.js`에서 각 문항의 사례(`scenario`), 과업(`task`), AI 페르소나 지시문
+(`aiSystemPrompt`), 평가 관점(`rubric`)을 자유롭게 수정할 수 있습니다.
+
+## 6. 제출 데이터
+
+응시자가 제출하면 `data/submissions/`에 이름+타임스탬프로 JSON 파일이 저장됩니다
+(답안 전문 + AI 대화 기록 포함, 평가자가 검토용으로 확인 가능). 이 폴더는 `.gitignore`에
+포함되어 있어 커밋되지 않습니다.
+
+## 7. 배포 시 참고
+
+- API 키가 서버에서만 사용되므로(브라우저에 노출되지 않음) 안전합니다.
+- Render, Railway, Fly.io 등 Node.js를 지원하는 무료/저가 호스팅에 그대로 배포 가능합니다.
+- 배포 시 환경변수(`GEMINI_API_KEY` 등)를 호스팅 서비스의 환경변수 설정에 등록하세요.

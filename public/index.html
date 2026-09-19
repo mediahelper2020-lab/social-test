@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>사회복지 현장 AI 활용 역량 평가</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- 시작 화면 -->
+<section id="screen-start" class="screen active">
+  <div class="start-card">
+    <div class="badge">"AI 활용 역량 찾습니다"</div>
+    <h1>사회복지 현장 AI 활용 역량 평가</h1>
+    <p class="lead">
+      아동복지·노인복지·장애인복지·청소년복지·정신건강 5개 영역의 실제 현장 사례를 바탕으로,
+      AI와 대화하며 문제를 해결해 나가는 역량을 평가합니다.<br />
+      정답을 맞히는 시험이 아니라, <strong>AI를 현장 문제 해결에 얼마나 잘 활용하는가</strong>를 보는 시험입니다.
+    </p>
+    <ul class="info-list">
+      <li>총 5문항 · 영역별 1문항 · 제한시간 <span id="info-minutes">60</span>분</li>
+      <li>각 문항마다 오른쪽 AI 어시스트와 자유롭게 상의할 수 있습니다</li>
+      <li>AI의 답변을 그대로 옮기지 말고, 현장 전문성으로 검증·보완하여 답안을 작성하세요</li>
+    </ul>
+    <form id="start-form">
+      <label>이름
+        <input type="text" id="input-name" required placeholder="홍길동" />
+      </label>
+      <label>소속기관 / 지원 분야
+        <input type="text" id="input-org" required placeholder="예) OO지역아동센터 지원자" />
+      </label>
+      <button type="submit" class="btn-primary">시험 시작하기</button>
+    </form>
+    <p id="ai-status" class="ai-status">AI 연동 상태 확인 중...</p>
+  </div>
+</section>
+
+<!-- 시험 화면 -->
+<section id="screen-exam" class="screen">
+  <header class="exam-topbar">
+    <div class="topbar-left">
+      <span class="badge small">"AI 활용 역량 찾습니다"</span>
+      <span id="candidate-info" class="candidate-info"></span>
+    </div>
+    <div class="topbar-right">
+      <span class="timer-label">종료까지</span>
+      <span id="timer" class="timer">00:00:00</span>
+    </div>
+  </header>
+
+  <div class="exam-body">
+    <nav class="q-nav">
+      <div id="q-nav-list" class="q-nav-list"></div>
+      <button id="btn-submit-exam" class="btn-submit-exam">제출하기</button>
+    </nav>
+
+    <main class="q-main">
+      <div class="q-header">
+        <span id="q-domain-badge" class="domain-badge"></span>
+        <h2 id="q-title"></h2>
+      </div>
+      <div class="q-scenario">
+        <h3>사례</h3>
+        <p id="q-scenario"></p>
+      </div>
+      <div class="q-task">
+        <h3>과업</h3>
+        <p id="q-task"></p>
+      </div>
+      <div class="q-answer">
+        <h3>최종 답안</h3>
+        <textarea id="q-answer" placeholder="AI와 논의한 내용을 바탕으로, 당신의 최종 답안을 작성하세요."></textarea>
+      </div>
+      <div class="q-controls">
+        <button id="btn-prev" class="btn-secondary">이전 문항</button>
+        <button id="btn-next" class="btn-secondary">다음 문항</button>
+      </div>
+    </main>
+
+    <aside class="ai-panel">
+      <div class="ai-panel-header">
+        <span class="ai-dot"></span>
+        <span>AI 어시스트</span>
+        <span id="ai-remaining" class="ai-remaining"></span>
+      </div>
+      <div id="ai-messages" class="ai-messages"></div>
+      <form id="ai-form" class="ai-form">
+        <textarea id="ai-input" rows="2" placeholder="AI에게 이 사례에 대해 질문하거나 함께 논의해 보세요..."></textarea>
+        <button type="submit" class="btn-primary small">전송</button>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<!-- 결과 화면 -->
+<section id="screen-result" class="screen">
+  <div class="result-card">
+    <h1>제출 완료</h1>
+    <p class="lead">수고하셨습니다. 아래는 문항별 평가 관점(자기 점검용)입니다. 제출된 답안과 AI 대화 기록은 평가자에게 함께 전달됩니다.</p>
+    <div id="result-rubric" class="result-rubric"></div>
+    <button id="btn-download" class="btn-primary">답안 + 대화기록 다운로드 (.txt)</button>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
