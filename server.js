@@ -55,8 +55,14 @@ app.post("/api/chat", async (req, res) => {
   try {
     const { sessionId, questionId, history, message } = req.body || {};
 
-    if (!sessionId || !sessions.has(sessionId)) {
+    if (!sessionId || typeof sessionId !== "string") {
       return res.status(400).json({ error: "세션이 유효하지 않습니다. 페이지를 새로고침해 주세요." });
+    }
+    // 서버리스 환경에서는 요청마다 다른 인스턴스가 처리할 수 있어
+    // /api/session/init을 처리한 인스턴스와 메모리가 공유되지 않을 수 있다.
+    // 세션이 없으면 거부하는 대신 새로 등록해 계속 진행한다.
+    if (!sessions.has(sessionId)) {
+      sessions.set(sessionId, { remaining: MAX_AI_MESSAGES, createdAt: Date.now() });
     }
     const question = QUESTIONS.find((q) => q.id === Number(questionId));
     if (!question) {
@@ -110,11 +116,17 @@ app.post("/api/submit", (req, res) => {
       chatLogs: chatLogs || {},
     };
 
-    const dir = path.join(__dirname, "data", "submissions");
-    fs.mkdirSync(dir, { recursive: true });
-    const safeNamePart = String(name).replace(/[^\w가-힣-]/g, "_");
-    const filename = `${Date.now()}_${safeNamePart}.json`;
-    fs.writeFileSync(path.join(dir, filename), JSON.stringify(record, null, 2), "utf-8");
+    // Vercel 등 서버리스 환경은 배포된 코드 디렉터리가 읽기 전용이라 파일 저장이 실패할 수 있다.
+    // 저장에 실패해도 응시자의 제출 자체는 막지 않고 로그만 남긴다.
+    try {
+      const dir = path.join(__dirname, "data", "submissions");
+      fs.mkdirSync(dir, { recursive: true });
+      const safeNamePart = String(name).replace(/[^\w가-힣-]/g, "_");
+      const filename = `${Date.now()}_${safeNamePart}.json`;
+      fs.writeFileSync(path.join(dir, filename), JSON.stringify(record, null, 2), "utf-8");
+    } catch (writeErr) {
+      console.warn("[/api/submit] 제출 파일 저장 실패 (서버리스 환경에서는 정상일 수 있음):", writeErr.message);
+    }
 
     const rubricByQuestion = Object.fromEntries(QUESTIONS.map((q) => [q.id, { title: q.title, domain: q.domain, rubric: q.rubric }]));
 
@@ -125,6 +137,12 @@ app.post("/api/submit", (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`사회복지 현장 AI 활용 역량 평가 서버가 http://localhost:${PORT} 에서 실행 중입니다. (AI provider: ${AI_PROVIDER})`);
-});
+// `node server.js`로 직접 실행할 때만 상시 서버를 띄운다.
+// Vercel 등 서버리스 환경에서는 이 파일이 require만 되고 listen은 호출되지 않는다.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`사회복지 현장 AI 활용 역량 평가 서버가 http://localhost:${PORT} 에서 실행 중입니다. (AI provider: ${AI_PROVIDER})`);
+  });
+}
+
+module.exports = app;

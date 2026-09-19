@@ -71,5 +71,23 @@ npm start
 ## 7. 배포 시 참고
 
 - API 키가 서버에서만 사용되므로(브라우저에 노출되지 않음) 안전합니다.
-- Render, Railway, Fly.io 등 Node.js를 지원하는 무료/저가 호스팅에 그대로 배포 가능합니다.
+- Render, Railway, Fly.io 등 상시 실행형 Node.js 호스팅은 `server.js`를 그대로 배포하면 됩니다.
 - 배포 시 환경변수(`GEMINI_API_KEY` 등)를 호스팅 서비스의 환경변수 설정에 등록하세요.
+
+### Vercel 배포
+
+Vercel은 서버리스 환경이라 `app.listen()`으로 상시 실행되는 서버를 그대로 인식하지 못합니다.
+이를 위해 `api/index.js`(서버리스 함수 진입점)와 `vercel.json`(모든 요청을 그 함수로 라우팅)을
+이미 포함해 두었으니 별도 설정 없이 배포하면 됩니다.
+
+1. Vercel 프로젝트 생성 후 이 저장소를 연결
+2. **Project Settings → Environment Variables**에서 아래 값을 등록 (Production/Preview 모두)
+   ```
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=발급받은키
+   ```
+   `.env` 파일은 로컬 전용이며 Vercel에는 올라가지 않으므로, 반드시 대시보드에서 직접 등록해야 합니다.
+3. 환경변수를 등록/수정한 뒤에는 **Redeploy**를 한 번 더 실행해야 반영됩니다.
+4. 참고: 서버리스 특성상
+   - `/api/submit` 제출 기록(`data/submissions/`)은 파일로 저장되지 않습니다(읽기 전용 파일시스템). 필요하면 추후 DB(Vercel KV, Supabase 등) 연동을 고려하세요.
+   - 응시자별 "AI 대화 가능 횟수" 카운트는 인스턴스별 메모리에 저장되어 정확히 전역으로 합산되지 않을 수 있습니다(교육/내부용으로는 충분한 수준).
