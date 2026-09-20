@@ -52,11 +52,19 @@
       <span id="candidate-info" class="candidate-info"></span>
     </div>
     <div class="topbar-right">
+      <span id="leave-badge" class="leave-badge" hidden>이탈 감지 <b id="leave-count">0</b>회</span>
       <span class="timer-label">종료까지</span>
       <span id="timer" class="timer">00:00:00</span>
       <button id="btn-submit-exam" class="btn-submit-exam">제출하기</button>
+      <button id="btn-quit-exam" class="btn-quit-exam" type="button">시험 종료</button>
     </div>
   </header>
+
+  <div id="leave-warning" class="leave-warning" hidden>
+    <strong>시험 중 다른 화면으로 이동한 것이 감지되었습니다.</strong>
+    이탈 횟수는 기록되어 평가자에게 전달됩니다. 시험 중에는 이 창을 벗어나지 마세요.
+    <button id="btn-dismiss-warning" class="btn-dismiss-warning" type="button">확인</button>
+  </div>
 
   <div class="exam-body">
     <nav class="q-nav">

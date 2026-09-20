@@ -16,6 +16,11 @@
     endTime: null,
     timerHandle: null,
     reportText: "",
+    // 시험 중 이탈 감시. 브라우저는 탭 닫기나 다른 탭 열기를 웹페이지가 막을 수 없으므로,
+    // 막는 대신 "경고 + 기록"으로 다룬다(기록은 제출 시 평가자에게 함께 전달됨).
+    examInProgress: false,
+    leaveCount: 0,
+    fullscreenExitCount: 0,
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -156,10 +161,84 @@
       startTimer(computeExamMinutes(state.questions.length));
       $("#candidate-info").textContent = `${state.name} · ${state.org} · ${domain.label}`;
       showScreen("exam");
+      startProctoring();
     } catch (err) {
       showLoadingError(err.message || "문제를 출제하지 못했습니다. 다시 시도해 주세요.", generateAndStart);
     }
   }
+
+  /* ---------- 시험 중 이탈 감시 ----------
+   * 브라우저 보안상 웹페이지가 탭을 못 닫게 하거나 다른 탭 열기를 막는 것은 불가능하다.
+   * 그래서 (1) 나가려 하면 브라우저 기본 확인창이 뜨게 하고, (2) 다른 화면으로 이동한
+   * 횟수를 세어 경고를 띄우고, (3) 그 기록을 제출 시 평가자에게 함께 넘기는 방식으로 다룬다.
+   */
+  function startProctoring() {
+    state.examInProgress = true;
+    state.leaveCount = 0;
+    state.fullscreenExitCount = 0;
+    updateLeaveBadge();
+    requestFullscreen();
+  }
+
+  function stopProctoring() {
+    state.examInProgress = false;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  function requestFullscreen() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {
+        // 브라우저가 거부해도 시험 자체는 계속 진행한다.
+      });
+    }
+  }
+
+  function updateLeaveBadge() {
+    const badge = $("#leave-badge");
+    badge.hidden = state.leaveCount === 0;
+    $("#leave-count").textContent = state.leaveCount;
+  }
+
+  function flagLeave() {
+    if (!state.examInProgress) return;
+    state.leaveCount += 1;
+    updateLeaveBadge();
+    $("#leave-warning").hidden = false;
+  }
+
+  // 탭 전환, 창 최소화, 다른 앱으로 전환 시 발생
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flagLeave();
+  });
+
+  // 전체화면에서 빠져나가는 것도 이탈 신호로 기록한다.
+  document.addEventListener("fullscreenchange", () => {
+    if (state.examInProgress && !document.fullscreenElement) {
+      state.fullscreenExitCount += 1;
+    }
+  });
+
+  // 시험 중 탭 닫기/새로고침/뒤로가기를 시도하면 브라우저 확인창이 뜬다.
+  window.addEventListener("beforeunload", (e) => {
+    if (!state.examInProgress) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
+  $("#btn-dismiss-warning").addEventListener("click", () => {
+    $("#leave-warning").hidden = true;
+    requestFullscreen();
+  });
+
+  $("#btn-quit-exam").addEventListener("click", () => {
+    if (!confirm("채점하지 않고 시험을 종료하시겠습니까?\n지금까지 작성한 답안은 저장되지 않습니다.")) return;
+    clearInterval(state.timerHandle);
+    stopProctoring();
+    location.reload();
+  });
 
   function startTimer(minutes) {
     state.endTime = Date.now() + minutes * 60 * 1000;
@@ -342,6 +421,8 @@
   async function submitExam(auto) {
     clearInterval(state.timerHandle);
     saveCurrentAnswer();
+    stopProctoring();
+    $("#leave-warning").hidden = true;
 
     const answers = state.questions.map((q) => ({
       questionId: q.id,
@@ -370,6 +451,11 @@
           startedAt: state.startedAt,
           answers,
           chatLogs: state.chatLogs,
+          proctor: {
+            leaveCount: state.leaveCount,
+            fullscreenExitCount: state.fullscreenExitCount,
+            autoSubmitted: !!auto,
+          },
         }),
       });
       const data = await res.json();
@@ -396,12 +482,13 @@
 
   function renderResult(answers, overall, perQuestion, byCompetency, auto) {
     const notice = $("#result-notice");
-    if (auto) {
-      notice.hidden = false;
-      notice.textContent = "제한 시간이 종료되어 자동 제출되었습니다.";
-    } else {
-      notice.hidden = true;
+    const notes = [];
+    if (auto) notes.push("제한 시간이 종료되어 자동 제출되었습니다.");
+    if (state.leaveCount > 0) {
+      notes.push(`시험 중 다른 화면으로 이동한 기록이 ${state.leaveCount}회 있습니다 (평가자에게 함께 전달됩니다).`);
     }
+    notice.hidden = notes.length === 0;
+    notice.textContent = notes.join(" ");
 
     const badge = $("#grade-badge");
     if (overall) {
@@ -513,6 +600,7 @@
     lines.push(`소속기관/지원분야: ${state.org}`);
     lines.push(`응시 영역: ${state.selectedDomain?.label || ""}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
+    lines.push(`시험 중 이탈 감지: ${state.leaveCount}회 (전체화면 해제 ${state.fullscreenExitCount}회)`);
     if (overall) {
       lines.push(`총점: ${overall.percentage} / 100점 (등급 ${overall.grade}, 원점수 ${overall.totalScore}/${overall.maxScore})`);
     }

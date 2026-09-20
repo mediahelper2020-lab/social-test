@@ -213,7 +213,7 @@ function buildByCompetency(perQuestion) {
 
 app.post("/api/submit", async (req, res) => {
   try {
-    const { sessionId, name, org, domain, answers, chatLogs, startedAt } = req.body || {};
+    const { sessionId, name, org, domain, answers, chatLogs, startedAt, proctor } = req.body || {};
     if (!name || !org) {
       return res.status(400).json({ error: "이름과 소속기관을 입력해 주세요." });
     }
@@ -261,6 +261,8 @@ app.post("/api/submit", async (req, res) => {
       domain,
       startedAt,
       submittedAt: new Date().toISOString(),
+      // 시험 중 이탈 기록(탭 전환 횟수 등). 점수에는 반영하지 않고 평가자 참고용으로만 남긴다.
+      proctor: proctor || {},
       answers,
       chatLogs: chatLogs || {},
       grading: { overall, perQuestion, byCompetency },
