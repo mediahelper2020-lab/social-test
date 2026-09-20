@@ -19,9 +19,14 @@
       <span class="eyebrow"><i class="eyebrow-dot"></i>AI 활용 역량 평가</span>
       <h1 class="display">사회복지현장<br /><em>AI 역량 시험</em></h1>
       <p class="lead">
-        실제 사회복지 현장 32곳 중 응시할 곳을 선택하면, AI가 그 현장에 맞는 사례를
-        <strong>그 자리에서 새로 출제</strong>합니다. 같은 현장을 다시 응시해도 매번 다른 문제가 나옵니다.
-        정답을 맞히는 시험이 아니라, <strong>AI를 현장 문제 해결에 얼마나 잘 활용하는가</strong>를 봅니다.
+        실제 사회복지 현장 <strong><span id="domain-count">34</span>곳</strong> 중 응시할 곳을 선택하면,
+        AI가 그 현장에 맞는 사례를 <strong>그 자리에서 새로 출제</strong>합니다. 목록에 없는 기관은 직접
+        입력할 수 있고, 같은 현장을 다시 응시해도 매번 다른 문제가 나옵니다.
+      </p>
+      <p class="lead">
+        좋은 답안은 AI가 대신 써줍니다. 그래서 이 시험은 답안의 완성도가 아니라
+        <strong>AI를 쓰면서 사고를 내지 않는가</strong>를 봅니다. AI 어시스트는 대화 중
+        <strong>일부러 잘못된 제안</strong>을 섞어 넣으며, 그것을 걸러내는지가 채점 대상입니다.
       </p>
     </header>
 
@@ -34,7 +39,7 @@
       <div class="feature-tile">
         <span class="feature-num">5</span>
         <h3>평가 역량</h3>
-        <p>문제해결 · 창의적 사고 · 비판적 사고 · 비식별화 준수 · 프롬프트 활용</p>
+        <p>검증 · 정보보호 실행 · <strong>AI 사용 경계 판단</strong> · 당사자 권익 보호 · 업무 재설계</p>
       </div>
       <div class="feature-tile">
         <span class="feature-num">30<small>분</small></span>
@@ -61,6 +66,19 @@
           <input type="search" id="domain-search" class="domain-search" placeholder="현장 검색" autocomplete="off" />
         </div>
         <div id="domain-picker" class="domain-picker"></div>
+        <div id="custom-domain-wrap" class="custom-domain-wrap" hidden>
+          <input
+            type="text"
+            id="input-custom-domain"
+            class="custom-domain-input"
+            placeholder="기관·직무 이름을 입력하세요 (예: 장애인직업재활시설, 노숙인일시보호시설)"
+            maxlength="40"
+            autocomplete="off"
+          />
+          <p class="custom-domain-help">
+            입력한 기관 이름을 바탕으로 AI가 그 현장에 맞는 문항을 새로 출제합니다.
+          </p>
+        </div>
         <p id="domain-hint" class="domain-hint">응시할 현장을 선택하세요.</p>
       </div>
 
@@ -129,7 +147,22 @@
             <h3 class="block-label">최종 답안</h3>
             <span id="char-count" class="char-count">0자</span>
           </div>
-          <textarea id="q-answer" placeholder="AI와 논의한 내용을 바탕으로, 당신의 최종 답안을 작성하세요."></textarea>
+          <textarea id="q-answer" placeholder="당신의 최종 판단과 실행 계획을 작성하세요."></textarea>
+        </section>
+
+        <section class="q-block q-ailog">
+          <div class="block-label-row">
+            <h3 class="block-label">AI 활용 기록</h3>
+            <span id="ailog-count" class="char-count">0자</span>
+          </div>
+          <p class="block-sub">
+            현장에서 "AI가 그랬어요"는 통하지 않습니다. 아래 세 가지를 구분해 적으세요.
+            <b>이 칸은 'AI 사용 경계 판단' 역량의 주된 채점 근거입니다.</b>
+          </p>
+          <textarea
+            id="q-ailog"
+            placeholder="① AI에게 맡긴 일:&#10;② 내가 직접 판단한 일:&#10;③ AI 답변 중 그대로 따르면 안 되는 부분 / 반드시 확인해야 할 것:"
+          ></textarea>
         </section>
 
         <div class="q-controls">
@@ -146,6 +179,11 @@
         <span id="ai-remaining" class="ai-remaining"></span>
       </div>
       <div id="ai-messages" class="ai-messages"></div>
+      <div id="pii-alert" class="pii-alert" hidden>
+        <strong>개인식별정보가 감지되었습니다</strong>
+        <span id="pii-alert-types"></span>
+        실제 현장에서 AI에 입력하면 안 되는 정보입니다. 이 입력은 채점에 기록됩니다.
+      </div>
       <form id="ai-form" class="ai-form">
         <textarea id="ai-input" rows="2" placeholder="이 사례에 대해 AI와 논의해 보세요… (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
         <button type="submit" class="btn btn-primary btn-send">전송</button>
@@ -206,6 +244,7 @@
   </div>
 </section>
 
+<script src="pii.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

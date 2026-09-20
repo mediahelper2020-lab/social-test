@@ -5,12 +5,13 @@
     domains: [], // [{key, label, color}]
     selectedDomain: null, // {key, label, color}
     questions: [], // 이번 시험에서 AI가 출제한 문항 3개
-    systemPrompt: "", // 이번 시험(현장)의 AI 채팅 코치 페르소나
+    customDomainLabel: "", // "기타" 선택 시 응시자가 직접 입력한 기관명
     currentIndex: 0,
     name: "",
     org: "",
     startedAt: null,
-    answers: {}, // questionId -> string
+    answers: {}, // questionId -> string (최종 답안)
+    aiLogs: {}, // questionId -> string (AI 활용 기록)
     chatLogs: {}, // questionId -> [{role:'user'|'ai', text}]
     remaining: 0,
     endTime: null,
@@ -62,6 +63,8 @@
       state.config = configRes;
       state.domains = domainsRes.domains;
       renderDomainPicker();
+      // 현장이 늘어나도 소개 문구가 어긋나지 않도록 실제 개수로 채운다.
+      $("#domain-count").textContent = state.domains.length;
 
       const statusEl = $("#ai-status");
       if (state.config.aiConfigured) {
@@ -77,24 +80,21 @@
     }
   }
 
+  // 목록에 없는 기관을 직접 입력할 수 있도록 마지막에 붙는 가상 항목.
+  const CUSTOM_DOMAIN = { key: "custom", label: "기타 (직접 입력)", color: "#868e96", custom: true };
+
   function renderDomainPicker(filter = "") {
     const picker = $("#domain-picker");
     const needle = filter.trim();
-    const list = needle ? state.domains.filter((d) => d.label.includes(needle)) : state.domains;
+    const matched = needle ? state.domains.filter((d) => d.label.includes(needle)) : state.domains;
+    // "기타"는 검색 결과가 없을 때도 남겨둬야 목록에 없는 기관을 입력할 수 있다.
+    const list = [...matched, CUSTOM_DOMAIN];
 
     picker.innerHTML = "";
-    if (list.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "domain-hint";
-      empty.textContent = "검색 결과가 없습니다.";
-      picker.appendChild(empty);
-      return;
-    }
-
     list.forEach((d, i) => {
       const card = document.createElement("button");
       card.type = "button";
-      card.className = "domain-card";
+      card.className = d.custom ? "domain-card domain-card-custom" : "domain-card";
       card.dataset.key = d.key;
       card.style.setProperty("--dot", d.color);
       card.style.animationDelay = `${Math.min(i, 12) * 22}ms`;
@@ -126,13 +126,45 @@
     state.selectedDomain = domain;
     refreshDomainSelection();
 
-    const totalMinutes = computeExamMinutes(3);
-    const hint = $("#domain-hint");
-    hint.textContent = `${domain.label} · 총 3문항(AI 실시간 출제) · 제한시간 ${totalMinutes}분`;
-    hint.classList.add("on");
+    const isCustom = !!domain.custom;
+    $("#custom-domain-wrap").hidden = !isCustom;
+    if (isCustom) $("#input-custom-domain").focus();
 
-    $("#btn-start").disabled = false;
+    refreshStartState();
   }
+
+  // 선택한 현장(또는 직접 입력한 기관명)에 따라 안내 문구와 시작 버튼 상태를 갱신한다.
+  function refreshStartState() {
+    const domain = state.selectedDomain;
+    const hint = $("#domain-hint");
+    const startBtn = $("#btn-start");
+
+    if (!domain) {
+      hint.textContent = "응시할 현장을 선택하세요.";
+      hint.classList.remove("on");
+      startBtn.disabled = true;
+      return;
+    }
+
+    const totalMinutes = computeExamMinutes(3);
+    const label = domain.custom ? state.customDomainLabel : domain.label;
+
+    if (domain.custom && label.length < 2) {
+      hint.textContent = "응시할 기관·직무 이름을 2자 이상 입력하세요.";
+      hint.classList.remove("on");
+      startBtn.disabled = true;
+      return;
+    }
+
+    hint.textContent = `${label} · 총 3문항(AI 실시간 출제) · 제한시간 ${totalMinutes}분`;
+    hint.classList.add("on");
+    startBtn.disabled = false;
+  }
+
+  $("#input-custom-domain").addEventListener("input", (e) => {
+    state.customDomainLabel = e.target.value.trim();
+    refreshStartState();
+  });
 
   $("#start-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -154,25 +186,33 @@
     await generateAndStart();
   });
 
+  // 선택한 현장의 표시 이름. "기타"라면 응시자가 직접 입력한 기관명을 쓴다.
+  function domainLabel() {
+    const d = state.selectedDomain;
+    if (!d) return "";
+    return d.custom ? state.customDomainLabel : d.label;
+  }
+
   async function generateAndStart() {
     const domain = state.selectedDomain;
+    const label = domainLabel();
     showLoading(
       "AI가 맞춤 문제를 출제하고 있습니다...",
-      `${domain.label} 현장에 맞는 시험 문항 3개를 새로 준비하는 중입니다. 10~30초 정도 걸릴 수 있습니다.`
+      `${label} 현장에 맞는 시험 문항 3개를 새로 준비하는 중입니다. 10~30초 정도 걸릴 수 있습니다.`
     );
 
     try {
       const res = await fetch("/api/generate-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain: domain.key }),
+        body: JSON.stringify({ domain: domain.key, customLabel: state.customDomainLabel }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "문제를 출제하지 못했습니다.");
 
       state.questions = data.questions;
-      state.systemPrompt = data.systemPrompt;
       state.answers = {};
+      state.aiLogs = {};
       state.chatLogs = {};
       state.questions.forEach((q) => {
         state.chatLogs[q.id] = [];
@@ -181,7 +221,7 @@
       renderNav();
       loadQuestion(0);
       startTimer(computeExamMinutes(state.questions.length));
-      $("#candidate-info").textContent = `${state.name} · ${state.org} · ${domain.label}`;
+      $("#candidate-info").textContent = `${state.name} · ${state.org} · ${label}`;
       showScreen("exam");
       startProctoring();
     } catch (err) {
@@ -317,6 +357,8 @@
   function updateCharCount() {
     const len = $("#q-answer").value.trim().length;
     $("#char-count").textContent = `${len.toLocaleString("ko-KR")}자`;
+    const logLen = $("#q-ailog").value.trim().length;
+    $("#ailog-count").textContent = `${logLen.toLocaleString("ko-KR")}자`;
   }
 
   function loadQuestion(idx) {
@@ -334,6 +376,7 @@
     $("#q-scenario").textContent = q.scenario;
     $("#q-task").textContent = q.task;
     $("#q-answer").value = state.answers[q.id] || "";
+    $("#q-ailog").value = state.aiLogs[q.id] || "";
     $("#q-counter").textContent = `문항 ${idx + 1} / ${state.questions.length}`;
 
     $("#btn-prev").disabled = idx === 0;
@@ -352,12 +395,15 @@
     const q = state.questions[state.currentIndex];
     if (!q) return;
     state.answers[q.id] = $("#q-answer").value;
+    state.aiLogs[q.id] = $("#q-ailog").value;
   }
 
-  $("#q-answer").addEventListener("input", () => {
-    saveCurrentAnswer();
-    refreshNavState();
-    updateCharCount();
+  ["#q-answer", "#q-ailog"].forEach((sel) => {
+    $(sel).addEventListener("input", () => {
+      saveCurrentAnswer();
+      refreshNavState();
+      updateCharCount();
+    });
   });
 
   $("#btn-prev").addEventListener("click", () => {
@@ -398,6 +444,24 @@
     return el;
   }
 
+  let piiAlertTimer = null;
+
+  // pii.js의 규칙으로 응시자 입력을 검사해, 검출되면 AI 패널 위에 잠시 경고를 띄운다.
+  function showPiiAlert(text) {
+    const alertEl = $("#pii-alert");
+    const findings = window.PII ? window.PII.summarize(window.PII.scan(text)) : [];
+    if (findings.length === 0) {
+      alertEl.hidden = true;
+      return;
+    }
+    $("#pii-alert-types").textContent = findings.map((f) => `${f.type} ${f.count}건`).join(", ");
+    alertEl.hidden = false;
+    clearTimeout(piiAlertTimer);
+    piiAlertTimer = setTimeout(() => {
+      alertEl.hidden = true;
+    }, 12000);
+  }
+
   function updateRemainingBadge() {
     $("#ai-remaining").textContent = `${state.remaining}회 남음`;
   }
@@ -415,6 +479,10 @@
     const q = state.questions[state.currentIndex];
     const historyBefore = [...(state.chatLogs[q.id] || [])];
 
+    // 입력 내용을 막지는 않는다. 실제 현장에서도 막아주는 장치는 없고, 이 시험은 그 판단 자체를
+    // 평가하기 때문이다. 대신 무엇이 검출됐는지 즉시 알려 시험이 곧 교육이 되게 한다.
+    showPiiAlert(message);
+
     state.chatLogs[q.id].push({ role: "user", text: message });
     appendMessageEl("user", message);
     input.value = "";
@@ -429,7 +497,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: state.sessionId,
-          systemPrompt: state.systemPrompt,
+          token: q.token,
           history: historyBefore,
           message,
         }),
@@ -478,14 +546,11 @@
     stopProctoring();
     $("#leave-warning").hidden = true;
 
+    // 사례·과업·함정 정답지는 서버가 토큰에서 직접 읽는다. 여기서는 응시자가 쓴 것만 보낸다.
     const answers = state.questions.map((q) => ({
-      questionId: q.id,
-      domain: q.domain,
-      title: q.title,
-      type: q.type,
-      scenario: q.scenario,
-      task: q.task,
+      token: q.token,
       answer: state.answers[q.id] || "",
+      aiLog: state.aiLogs[q.id] || "",
     }));
 
     showLoading("AI가 답안을 채점하고 있습니다...", "문항별 평가기준에 따라 세부 점수를 산정하는 중입니다. 잠시만 기다려 주세요.");
@@ -501,7 +566,7 @@
           sessionId: state.sessionId,
           name: state.name,
           org: state.org,
-          domain: state.selectedDomain?.label,
+          domain: domainLabel(),
           startedAt: state.startedAt,
           answers,
           chatLogs: state.chatLogs,
@@ -616,7 +681,7 @@
 
         const rowsHtml = q.criteria
           .map((c) => {
-            const isPrivacy = c.key === "deidentification";
+            const isPrivacy = c.key === "dataProtection";
             const lines = [];
             if (c.evidence) {
               lines.push(`<p class="criterion-line ev"><b>확인된 내용</b>${escapeHtml(c.evidence)}</p>`);
@@ -644,7 +709,16 @@
           ? `<div class="breakdown-summary"><b>총평</b>${escapeHtml(q.summary)}</div>`
           : "";
 
-        div.innerHTML = `${head}${summaryHtml}${rowsHtml}`;
+        const piiHtml =
+          q.piiFindings && q.piiFindings.length > 0
+            ? `<div class="pii-verdict">
+                 <b>AI 입력값에서 개인식별정보가 검출되었습니다</b>
+                 ${escapeHtml(q.piiFindings.map((f) => `${f.type} ${f.count}건`).join(", "))} —
+                 기계 검사로 확인된 사항이며 '정보보호 실행' 감점의 확정 근거입니다.
+               </div>`
+            : "";
+
+        div.innerHTML = `${head}${piiHtml}${summaryHtml}${rowsHtml}`;
         box.appendChild(div);
       });
     }
@@ -711,7 +785,7 @@
     lines.push("사회복지현장 AI 역량 시험 결과");
     lines.push(`이름: ${state.name}`);
     lines.push(`소속기관/지원분야: ${state.org}`);
-    lines.push(`응시 영역: ${state.selectedDomain?.label || ""}`);
+    lines.push(`응시 영역: ${domainLabel()}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
     lines.push(`시험 중 이탈 감지: ${state.leaveCount}회 (전체화면 해제 ${state.fullscreenExitCount}회)`);
     if (overall) {
@@ -726,21 +800,30 @@
     }
     lines.push("");
 
-    answers.forEach((a, idx) => {
-      const g = perQuestion?.find((p) => p.questionId === a.questionId);
+    // 제출 payload에는 응시자가 쓴 것만 담기므로, 문항 내용은 화면 상태에서 가져온다.
+    state.questions.forEach((q, idx) => {
+      const g = perQuestion?.find((p) => p.questionId === q.id);
       lines.push("=".repeat(60));
       const scoreLabel = !g ? "" : g.hadError ? " — 채점 보류" : ` — ${g.subtotal}/${g.submax}점`;
-      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}${scoreLabel}`);
+      lines.push(`문항 ${idx + 1}. [${q.domain}] ${q.title}${scoreLabel}`);
       lines.push("-".repeat(60));
       lines.push("[사례]");
-      lines.push(a.scenario);
+      lines.push(q.scenario);
       lines.push("");
       lines.push("[과업]");
-      lines.push(a.task);
+      lines.push(q.task);
       lines.push("");
       lines.push("[최종 답안]");
-      lines.push(a.answer || "(작성하지 않음)");
+      lines.push(state.answers[q.id] || "(작성하지 않음)");
       lines.push("");
+      lines.push("[AI 활용 기록]");
+      lines.push(state.aiLogs[q.id] || "(작성하지 않음)");
+      lines.push("");
+      if (g && g.piiFindings && g.piiFindings.length > 0) {
+        lines.push("[개인정보 기계 검사 - AI 입력값]");
+        g.piiFindings.forEach((f) => lines.push(`- ${f.type} ${f.count}건 (예: ${f.samples.join(", ")})`));
+        lines.push("");
+      }
       if (g && g.hadError) {
         lines.push("[채점 세부내역]");
         lines.push("AI 채점 서버 오류로 이 문항은 자동 채점되지 않았습니다. 총점에서도 제외되었으니 수동 채점이 필요합니다.");
@@ -752,9 +835,7 @@
           lines.push("");
         }
         g.criteria.forEach((c) => {
-          const isPrivacy = c.key === "deidentification";
-          const name = isPrivacy ? "개인정보 비식별 처리" : c.label;
-          lines.push(`- [${name}] ${c.score}/${c.max}점 (${scoreLevelLabel(c.score)})`);
+          lines.push(`- [${c.label}] ${c.score}/${c.max}점 (${scoreLevelLabel(c.score)})`);
           if (c.evidence) lines.push(`  · 확인된 내용: ${c.evidence}`);
           if (c.missing) lines.push(`  · 미흡한 점: ${c.missing}`);
           if (c.improve) lines.push(`  · 보완 방법: ${c.improve}`);
@@ -762,7 +843,7 @@
         lines.push("");
       }
       lines.push("[AI 대화 기록]");
-      const log = state.chatLogs[a.questionId] || [];
+      const log = state.chatLogs[q.id] || [];
       if (log.length === 0) {
         lines.push("(AI와 대화하지 않음)");
       } else {

@@ -46,14 +46,46 @@ async function chat({ systemPrompt, history, message }) {
   return text;
 }
 
-function buildGradingPrompt({ scenario, task, competencies, chatLog, answer }) {
+function buildGradingPrompt({ scenario, task, competencies, chatLog, answer, aiLog, trap, piiFindings }) {
   const competencyList = competencies.map((c, i) => `${i + 1}. ${c.label}: ${c.guide}`).join("\n");
   const chatText =
     Array.isArray(chatLog) && chatLog.length > 0
       ? chatLog.map((t) => `${t.role === "ai" ? "[AI]" : "[응시자]"} ${t.text}`).join("\n")
       : "(응시자가 AI와 대화하지 않았음)";
 
+  // 출제 시 함께 설계된 함정. 채점의 정답지 역할을 한다.
+  const trapText = trap
+    ? `이 문항에는 함정이 설계되어 있습니다. AI 어시스트는 대화 중 다음과 같이 주장하도록 지시받았습니다.
+
+  주장: "${trap.claim}"
+  이 주장의 결함: ${trap.flaw}
+
+"검증 역량" 채점 방법:
+- 위 대화 기록에 이 주장이 실제로 등장했는지 먼저 확인하십시오.
+- 등장했고 응시자가 이를 지적·반박·수정했다면 4~5점.
+- 등장했으나 응시자가 눈치채지 못했거나, 오히려 그 제안을 최종 답안에 반영했다면 0~1점.
+  (이 경우 미흡한 점에 AI의 어떤 주장을 걸러내지 못했는지 반드시 명시할 것)
+- 주장이 대화에 등장하지 않았다면 함정은 채점에서 제외하고, 응시자가 "무엇을 어디서 확인하겠다"고
+  스스로 밝혔는지만 보고 채점하십시오. 이때 등장하지 않은 함정을 근거로 감점하지 마십시오.`
+    : `이 문항에는 설계된 함정이 없습니다. "검증 역량"은 응시자가 AI의 제안 중 확인이 필요한 부분을
+스스로 짚고 "무엇을 어디서 확인하겠다"고 밝혔는지로만 채점하십시오.`;
+
+  // 정규식 기계 검사 결과. 채점 AI의 주관적 판단보다 우선하는 확정 증거다.
+  const piiText =
+    Array.isArray(piiFindings) && piiFindings.length > 0
+      ? `기계 검사 결과, 응시자가 AI에게 보낸 메시지에서 아래 개인식별정보가 검출되었습니다.
+${piiFindings.map((f) => `- ${f.type} ${f.count}건 (예: ${f.samples.join(", ")})`).join("\n")}
+
+이것은 확정된 사실이므로 "정보보호 실행"은 반드시 0~1점이어야 하며, 미흡한 점에 어떤 종류의
+정보를 입력했는지 명시하십시오. 최종 답안이 아무리 깔끔하게 비식별화되어 있어도 마찬가지입니다.`
+      : `기계 검사 결과, 응시자가 AI에게 보낸 메시지에서 개인식별정보는 검출되지 않았습니다.
+다만 이것만으로 만점은 아닙니다. 실명을 그대로 쓰지 않았는지, 소속기관·질병명 등으로 개인이
+특정될 여지는 없는지, 문서 자동화 지침에 개인정보 규칙을 넣었는지까지 함께 보고 채점하십시오.`;
+
   return `당신은 사회복지 현장 AI 활용 역량 평가의 엄격하지만 공정한 채점위원입니다.
+이 시험이 보려는 것은 "좋은 답안을 썼는가"가 아니라 "AI를 쓰면서 사고를 내지 않았는가"입니다.
+좋은 최종 답안은 AI가 대신 써줄 수 있으므로, 문장이 매끄럽다는 이유로 점수를 주지 마십시오.
+
 응시자는 채점 결과만 보고 스스로 무엇을 보완해야 하는지 알 수 있어야 하므로,
 "부족합니다" 같은 막연한 말 대신 어느 대목이 왜 부족한지를 답안 내용을 짚어가며 설명해야 합니다.
 
@@ -63,11 +95,20 @@ ${scenario}
 [과업]
 ${task}
 
-[응시자가 AI와 나눈 대화 기록 — "프롬프트 활용 역량" 채점 시 근거로 삼을 것]
+[응시자가 AI와 나눈 대화 기록]
 ${chatText}
 
 [응시자 최종 답안]
 ${answer}
+
+[응시자가 작성한 AI 활용 기록 — AI에게 맡긴 것 / 본인이 판단한 것 / 확인이 필요한 것]
+${aiLog || "(작성하지 않음)"}
+
+[함정 정답지]
+${trapText}
+
+[개인정보 기계 검사 결과]
+${piiText}
 
 아래 ${competencies.length}개의 역량 기준 각각에 대해 0~5점(정수)으로 채점하세요.
 ${competencyList}
@@ -76,19 +117,26 @@ ${competencyList}
 - 5점: 기준을 충실하고 구체적으로 충족함
 - 3~4점: 방향은 맞으나 구체성·근거가 부족함
 - 1~2점: 형식적으로만 언급했거나 현저히 미흡함
-- 0점: 전혀 다루지 않음 (답안이 비어 있거나 과업과 무관한 경우도 0점.
-  "프롬프트 활용 역량"은 위 대화 기록이 "(응시자가 AI와 대화하지 않았음)"이면 0점)
+- 0점: 전혀 다루지 않음 (답안이 비어 있거나 과업과 무관한 경우도 0점)
 
-역량마다 아래 세 가지를 모두 작성하세요. 한국어 존댓말로 쓰고, 답안에 실제로 등장한
-표현이나 항목을 인용해 근거를 밝히세요.
-- evidence: 답안에서 확인된 내용과 잘한 점. 1~2문장. (0점이면 "해당 내용을 찾을 수 없습니다." 로 시작)
+추가 채점 원칙:
+- "AI 사용 경계 판단"은 AI 활용 기록이 비어 있으면 최대 2점을 넘지 마십시오.
+  무엇을 AI에게 맡겼고 무엇을 본인이 판단했는지 설명할 수 없다면 현장에서 책임을 질 수 없습니다.
+- "당사자 권익 보호"는 당사자 의사 확인 없이 보호·격리·시설입소를 결정하거나, 동의 없이
+  제3자에게 정보를 공유하겠다고 한 경우 2점을 넘지 마십시오.
+- AI와 전혀 대화하지 않았다면 "검증 역량"은 0~1점입니다.
+
+역량마다 아래 세 가지를 모두 작성하세요. 한국어 존댓말로 쓰고, 답안이나 대화 기록에 실제로 등장한
+표현을 인용해 근거를 밝히세요.
+- evidence: 답안·대화에서 확인된 내용과 잘한 점. 1~2문장. (0점이면 "해당 내용을 찾을 수 없습니다."로 시작)
 - missing: 점수가 깎인 이유. 어떤 항목이 빠졌는지, 어느 서술이 왜 불충분한지 구체적으로
   2~3문장으로 지적할 것. 5점이면 "감점 요인은 없습니다."로 시작해 더 강화할 부분을 덧붙일 것.
-- improve: 다음에 어떻게 쓰면 점수가 올라가는지. 실제로 답안에 넣을 만한 문장이나 항목을
+- improve: 다음에 어떻게 하면 점수가 올라가는지. 실제로 답안에 넣을 만한 문장이나 행동을
   예시로 들어 1~2문장으로 제시할 것.
 
-summary에는 이 문항 전체에 대한 총평을 3~4문장으로 작성하세요. 가장 점수가 낮은 역량이
-무엇이고 그것이 왜 낮은지, 우선 무엇부터 보완해야 하는지를 포함하세요.
+summary에는 이 문항 전체에 대한 총평을 3~4문장으로 작성하세요. 함정이 대화에 등장했다면
+응시자가 그것을 걸러냈는지 여부를 반드시 언급하고, 가장 점수가 낮은 역량이 무엇이며 우선 무엇부터
+보완해야 하는지를 포함하세요.
 
 items 배열의 길이는 반드시 ${competencies.length}이어야 하며, 순서는 위 역량 기준 순서와 같아야 합니다.`;
 }
@@ -152,13 +200,13 @@ function parseGradingJson(text, count) {
 // chatLog: [{role:'user'|'ai', text}] / answer: 응시자 답안 텍스트
 // 반환: { summary, items: [{score(0~5), evidence, missing, improve}] }
 //        items는 competencies와 같은 길이·순서.
-async function grade({ scenario, task, competencies, chatLog, answer }) {
+async function grade({ scenario, task, competencies, chatLog, answer, aiLog, trap, piiFindings }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error("GROQ_API_KEY가 설정되어 있지 않습니다. .env 파일을 확인하세요.");
   }
 
-  const prompt = buildGradingPrompt({ scenario, task, competencies, chatLog, answer });
+  const prompt = buildGradingPrompt({ scenario, task, competencies, chatLog, answer, aiLog, trap, piiFindings });
 
   const res = await fetch(ENDPOINT, {
     method: "POST",
@@ -212,7 +260,9 @@ function extractJsonObject(text) {
   return null;
 }
 
-function buildGenerationPrompt({ label, brief, docHint }) {
+function buildGenerationPrompt({ label, brief, docHint, trapKinds }) {
+  const trapList = trapKinds.map((t, i) => `${i + 1}. ${t.label}: ${t.howTo}`).join("\n");
+
   return `당신은 "사회복지현장 AI 역량 시험"의 출제위원입니다. 아래 현장 정보를 참고하여 이 현장에
 맞는 실전 시험 문항 3개를 새로 출제하세요. 이미 출제된 적 있는 문항과 겹치지 않도록, 매번 다른
 구체적인 상황(나이, 정황, 갈등의 디테일)을 만들어야 합니다.
@@ -226,31 +276,47 @@ ${brief}
 [이 현장에서 실제 반복 작성하는 문서 종류 (문항 3 출제에 참고)]
 ${docHint}
 
+이 시험은 응시자가 "AI를 얼마나 잘 쓰는가"가 아니라 "AI를 쓸 때 사고를 내지 않는가"를 봅니다.
+그래서 문항마다 AI 어시스트가 대화 중에 흘릴 **함정**을 함께 설계해야 합니다.
+
+[함정 설계 규칙 — 가장 중요]
+함정은 반드시 정답이 "이 사례 안" 또는 "사회복지 직업윤리" 안에서 판정 가능해야 합니다.
+법령의 금액·연령·소득기준처럼 해마다 바뀌는 수치는 **절대 함정으로 쓰지 마십시오**
+(우리가 정답을 보증할 수 없고, 틀린 답안지로 응시자를 떨어뜨리게 됩니다).
+
+쓸 수 있는 함정 종류:
+${trapList}
+
+문항 3개는 서로 다른 종류의 함정을 사용해야 합니다.
+
 문항 구성 규칙:
 1. 문항 1, 2: 이 현장에서 실제로 벌어질 법한 구체적인 위기·갈등·딜레마 상황을 다루는 사례형 문항.
    두 문항은 서로 다른 종류의 문제를 다뤄야 한다(예: 하나는 안전/위기개입, 다른 하나는 관계/갈등
    조정처럼 - 정확히 이 예시를 따를 필요는 없고 현장에 맞게 다양화할 것). scenario에는 응시자가
-   처한 상황을 3~6문장으로 구체적으로 서술하고, task에는 AI 어시스트와 논의해서 수행할 구체적
-   과업을 2~4문장으로 제시한다(예: "(1)...평가, (2)...전략, (3)...계획을 도출하시오" 형식).
+   처한 상황을 4~7문장으로 구체적으로 서술한다. 함정이 "사례 모순"이나 "없는 자원 제안"이라면,
+   그 함정의 정답 근거가 되는 사실(예: "어머니는 3년 전 사망했다", "관내 쉼터는 올해 폐소했다")을
+   scenario 안에 반드시 명시해 두어야 한다.
 2. 문항 3: 위 "이 현장에서 실제 반복 작성하는 문서 종류" 중 하나를 골라, 실제 작성된 것처럼 보이는
    구체적인 예시 문서를 scenario 안에 "[예시 문서]" 블록으로 포함시키고(항목별 실제 값이 채워진
-   형태), task에는 "이 예시처럼 반복 작성해야 하는 상황이다. 담당자의 비정형 메모만 입력하면 AI가
-   이 형식대로 문서를 자동 작성하도록 맞춤 지침(커스텀 인스트럭션)을 설계하시오. 지침에는 (1)
-   문서의 고정 항목, (2) 항목을 구분해 정리하는 기준, (3) 개인정보·민감정보 처리 주의사항이
-   포함되어야 한다"는 취지의 과업을 제시한다.
-3. 모든 사례 속 인물은 실명 대신 성+OO 형태로 비식별화하라(예: 김OO, 최OO). 나이·성별 등은
-   구체적으로 표기해도 된다.
-4. 진부하거나 뻔한 소재를 피하고, 매번 새로운 조합의 구체적 디테일(나이, 상황, 실제 대사 인용 등)을
+   형태), task에는 담당자의 비정형 메모만 입력하면 AI가 이 형식대로 문서를 자동 작성하도록 맞춤
+   지침(커스텀 인스트럭션)을 설계하라는 과업을 제시한다.
+3. task는 2~4문장으로 쓰되, 반드시 아래 세 가지를 모두 요구해야 한다:
+   (1) 이 상황에서 수행할 구체적인 판단·개입·설계 내용
+   (2) AI 어시스트와 논의하되 AI의 제안 중 그대로 따르면 안 되는 부분을 찾아낼 것
+   (3) AI에게 맡길 일과 사람이 판단해야 할 일을 구분할 것
+4. 모든 사례 속 인물은 실명 대신 성+OO 형태로 비식별화하라(예: 김OO, 최OO). 나이·성별 등은
+   구체적으로 표기해도 된다. scenario에 실제 주민등록번호·전화번호·상세주소를 쓰지 말 것.
+5. 진부하거나 뻔한 소재를 피하고, 매번 새로운 조합의 구체적 디테일(나이, 상황, 실제 대사 인용 등)을
    사용하라.
 
-각 문항 객체는 다음 3개 필드만 가진다:
+각 문항 객체의 필드:
 - title: 문항 제목 (12~22자, 문항 3의 제목 앞에는 "[문서 자동화] "를 붙일 것)
-- scenario: 사례 설명 (문항 3은 예시 문서 블록 포함, 줄바꿈은 \\n으로 표기)
-- task: 응시자가 수행할 구체적 과업
-
-반드시 아래 JSON 형식으로만, 다른 설명 없이 응답하세요:
-{"questions":[{"title":"...","scenario":"...","task":"..."},{"title":"...","scenario":"...","task":"..."},{"title":"...","scenario":"...","task":"..."}]}
-questions 배열의 길이는 반드시 3이어야 하며, 순서대로 문항 1, 2, 3입니다.`;
+- scenario: 사례 설명 (줄바꿈은 \\n으로 표기)
+- task: 응시자가 수행할 구체적 과업 (위 3번 규칙을 반영)
+- trapKind: 사용한 함정 종류의 키. ${trapKinds.map((t) => `"${t.key}"`).join(" 또는 ")} 중 하나
+- trapClaim: AI 어시스트가 대화 중 확신에 찬 어조로 실제로 말할 문장 (1~2문장, 따옴표 없이)
+- trapFlaw: 그 제안이 왜 잘못인지, 그리고 응시자가 무엇을 근거로 반박해야 하는지 (1~2문장).
+  채점 기준으로 쓰이므로 사례의 어느 문장 또는 어떤 윤리 원칙과 충돌하는지 명확히 밝힐 것`;
 }
 
 // 모델이 배열을 바로 주거나 키 이름을 다르게 쓰는 경우까지 받아준다.
@@ -264,11 +330,13 @@ function pickQuestionArray(parsed) {
   return firstArray || null;
 }
 
-function validateGeneratedQuestions(parsed) {
+function validateGeneratedQuestions(parsed, trapKinds) {
   const arr = pickQuestionArray(parsed);
   if (!arr || arr.length < 3) {
     throw new Error("출제 응답 형식이 올바르지 않습니다.");
   }
+  const validKinds = new Set(trapKinds.map((t) => t.key));
+
   return arr.slice(0, 3).map((q, i) => {
     const title = String(q?.title || "").trim().slice(0, 80);
     const scenario = String(q?.scenario || "").trim().slice(0, 4000);
@@ -276,11 +344,23 @@ function validateGeneratedQuestions(parsed) {
     if (!title || !scenario || !task) {
       throw new Error(`문항 ${i + 1}의 내용이 비어 있습니다.`);
     }
-    return { type: i === 2 ? "document" : "scenario", title, scenario, task };
+
+    const trapClaim = String(q?.trapClaim || "").trim().slice(0, 600);
+    const trapFlaw = String(q?.trapFlaw || "").trim().slice(0, 600);
+    const rawKind = String(q?.trapKind || "").trim();
+    // 함정이 제대로 나오지 않아도 문항 자체는 쓸 수 있으므로 출제를 실패시키지는 않는다.
+    // 이 경우 검증 역량은 "확인이 필요한 지점을 스스로 짚었는가"로만 채점된다.
+    const trap =
+      trapClaim && trapFlaw
+        ? { kind: validKinds.has(rawKind) ? rawKind : "ethics", claim: trapClaim, flaw: trapFlaw }
+        : null;
+
+    return { type: i === 2 ? "document" : "scenario", title, scenario, task, trap };
   });
 }
 
-// label/brief/docHint: data/domains.js의 현장 프로필. 반환: [{type, title, scenario, task}] (3개)
+// label/brief/docHint/trapKinds: data/domains.js의 현장 프로필과 함정 종류 목록.
+// 반환: [{type, title, scenario, task, trap:{kind, claim, flaw}|null}] (3개)
 async function generateQuestions({ label, brief, docHint }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -297,9 +377,14 @@ async function generateQuestions({ label, brief, docHint }) {
     },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        {
+          role: "user",
+          content: `${prompt}\n\n반드시 아래 JSON 형식으로만, 다른 설명 없이 응답하세요:\n{"questions":[{"title":"...","scenario":"...","task":"...","trapKind":"...","trapClaim":"...","trapFlaw":"..."}]}\nquestions 배열의 길이는 반드시 3이어야 합니다.`,
+        },
+      ],
       temperature: 1.0,
-      max_tokens: 3500,
+      max_tokens: 6000,
       response_format: { type: "json_object" },
     }),
   });
@@ -312,7 +397,7 @@ async function generateQuestions({ label, brief, docHint }) {
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content || "";
   if (!text) throw new Error("출제 응답이 비어 있습니다.");
-  return validateGeneratedQuestions(extractJsonObject(text));
+  return validateGeneratedQuestions(extractJsonObject(text), trapKinds);
 }
 
 module.exports = { chat, grade, generateQuestions };

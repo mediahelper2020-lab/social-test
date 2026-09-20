@@ -899,6 +899,61 @@ input[type="text"]:focus, input[type="search"]:focus {
 
 .criterion-privacy .criterion-label { color: #a9c0ff; }
 
+/* ---------- 기타(직접 입력) 현장 ---------- */
+.domain-card-custom { border-style: dashed; }
+.custom-domain-wrap { margin-top: 12px; }
+.custom-domain-input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  padding: 13px 15px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.custom-domain-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.custom-domain-input::placeholder { color: var(--text-3); }
+.custom-domain-help { margin-top: 7px; font-size: 12px; color: var(--text-3); line-height: 1.6; }
+
+/* ---------- AI 활용 기록 ---------- */
+.block-sub { font-size: 12.5px; line-height: 1.7; color: var(--text-3); margin: -2px 0 10px; }
+.block-sub b { color: var(--text-2); font-weight: 650; }
+.q-ailog textarea { min-height: 150px; }
+
+/* ---------- 개인정보 입력 경고 ---------- */
+.pii-alert {
+  margin: 0 14px 10px;
+  padding: 11px 13px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+  background: rgba(255, 90, 90, 0.09);
+  border: 1px solid rgba(255, 90, 90, 0.34);
+  border-radius: 11px;
+  animation: pii-pop 0.3s var(--spring);
+}
+.pii-alert strong { display: block; color: var(--danger); margin-bottom: 3px; font-size: 13px; }
+.pii-alert span { color: var(--text); font-weight: 650; }
+@keyframes pii-pop {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.pii-verdict {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+  background: rgba(255, 90, 90, 0.08);
+  border: 1px solid rgba(255, 90, 90, 0.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.pii-verdict b { display: block; color: var(--danger); margin-bottom: 3px; }
+
 /* ---------- 반응형 ---------- */
 @media (max-width: 1100px) {
   .exam-body { grid-template-columns: 68px minmax(0, 1fr) 330px; }
