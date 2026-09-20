@@ -2,7 +2,7 @@
 // 무료 API 키 발급: https://aistudio.google.com/apikey (신용카드 등록 불필요)
 // 문서: https://ai.google.dev/gemini-api/docs/rate-limits (무료 티어 요청 한도 존재)
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 // history: [{ role: 'user' | 'ai', text: string }]
