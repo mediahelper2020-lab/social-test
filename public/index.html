@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>사회복지 현장 AI 활용 역량 평가</title>
+<title>사회복지현장 AI 역량 시험</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,7 +12,7 @@
 <section id="screen-start" class="screen active">
   <div class="start-card">
     <div class="badge">"AI 활용 역량 찾습니다"</div>
-    <h1>사회복지 현장 AI 활용 역량 평가</h1>
+    <h1>사회복지현장 AI 역량 시험</h1>
     <p class="lead">
       아동복지·노인복지·장애인복지·청소년복지·정신건강·장기요양기관, 응시할 영역을 선택하면
       그 영역의 실제 현장 사례를 바탕으로 AI와 대화하며 문제를 해결해 나가는 역량을 평가합니다.<br />
@@ -51,13 +51,13 @@
     <div class="topbar-right">
       <span class="timer-label">종료까지</span>
       <span id="timer" class="timer">00:00:00</span>
+      <button id="btn-submit-exam" class="btn-submit-exam">제출하기</button>
     </div>
   </header>
 
   <div class="exam-body">
     <nav class="q-nav">
       <div id="q-nav-list" class="q-nav-list"></div>
-      <button id="btn-submit-exam" class="btn-submit-exam">제출하기</button>
     </nav>
 
     <main class="q-main">
@@ -117,12 +117,24 @@
     <div class="score-summary">
       <div id="grade-badge" class="grade-badge">-</div>
       <div class="score-summary-text">
-        <div class="score-total"><span id="score-total-num">0</span> / <span id="score-total-max">0</span>점</div>
-        <div class="score-percentage"><span id="score-percentage">0</span>점 (100점 환산)</div>
+        <div class="score-total"><span id="score-percentage">0</span> / 100점</div>
+        <div class="score-percentage-sub">원점수 <span id="score-total-num">0</span> / <span id="score-total-max">0</span>점</div>
       </div>
     </div>
 
-    <p class="lead" style="margin-top:18px;">문항별 평가기준(개인정보 비식별 처리 포함)에 따른 세부 채점 결과입니다. 제출된 답안과 AI 대화 기록은 평가자에게 함께 전달됩니다.</p>
+    <div class="competency-chart-wrap">
+      <div class="competency-chart-head">
+        <h3>역량별 점수 (100점 환산)</h3>
+        <button id="btn-toggle-table" class="btn-link-toggle" type="button">표로 보기</button>
+      </div>
+      <div id="competency-chart" class="competency-chart"></div>
+      <table id="competency-table" class="competency-table" hidden>
+        <thead><tr><th>역량</th><th>점수</th></tr></thead>
+        <tbody id="competency-table-body"></tbody>
+      </table>
+    </div>
+
+    <p class="lead" style="margin-top:22px;">문항별 세부 채점 결과입니다 (역량 5개 × 문항별 0~5점). 제출된 답안과 AI 대화 기록은 평가자에게 함께 전달됩니다.</p>
     <div id="result-breakdown" class="result-breakdown"></div>
     <button id="btn-download" class="btn-primary">답안 + 채점결과 + 대화기록 다운로드 (.txt)</button>
   </div>

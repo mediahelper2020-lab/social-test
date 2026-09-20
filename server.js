@@ -4,11 +4,11 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const { QUESTIONS, PRIVACY_CRITERION } = require("./data/questions");
+const { QUESTIONS, COMPETENCIES } = require("./data/questions");
 
 const PORT = process.env.PORT || 3000;
 const AI_PROVIDER = process.env.AI_PROVIDER || "gemini"; // 'gemini' | 'groq'
-const MAX_AI_MESSAGES = parseInt(process.env.MAX_AI_MESSAGES || "40", 10);
+const MAX_AI_MESSAGES = parseInt(process.env.MAX_AI_MESSAGES || "20", 10);
 // 영역을 선택하면 그 영역의 문항 수 × 문항당 분 만큼 시험 시간이 정해지되,
 // 아무리 문항이 많아도 영역당 최대 이 값(분)을 넘지 않는다.
 const EXAM_MINUTES_PER_QUESTION = parseInt(process.env.EXAM_MINUTES_PER_QUESTION || "12", 10);
@@ -114,14 +114,20 @@ function scoreToGrade(percentage) {
   return "F";
 }
 
-// 문항 하나에 대해 (문항별 rubric 4개 + 공통 개인정보 비식별 기준 1개) = 5개 기준으로 채점한다.
-async function gradeAnswer(question, rawAnswer) {
-  const criteria = [...question.rubric, PRIVACY_CRITERION];
+// 모든 문항을 동일한 5개 역량 기준(COMPETENCIES)으로 채점한다. 문항별 rubric은
+// AI에게 "이 문항에서 무엇을 봐야 하는지" 참고 맥락으로만 전달된다.
+async function gradeAnswer(question, rawAnswer, chatLog) {
   const answer = typeof rawAnswer === "string" ? rawAnswer.trim().slice(0, MAX_ANSWER_LENGTH) : "";
 
   if (!answer) {
     return {
-      criteria: criteria.map((label) => ({ label, score: 0, max: 5, reason: "답안을 작성하지 않았습니다." })),
+      criteria: COMPETENCIES.map((c) => ({
+        key: c.key,
+        label: c.label,
+        score: 0,
+        max: 5,
+        reason: "답안을 작성하지 않았습니다.",
+      })),
       hadError: false,
     };
   }
@@ -130,18 +136,27 @@ async function gradeAnswer(question, rawAnswer) {
     const { scores, reasons } = await provider.grade({
       scenario: question.scenario,
       task: question.task,
-      criteria,
+      rubricContext: question.rubric,
+      competencies: COMPETENCIES,
+      chatLog: Array.isArray(chatLog) ? chatLog.slice(-24) : [],
       answer,
     });
     return {
-      criteria: criteria.map((label, i) => ({ label, score: scores[i], max: 5, reason: reasons[i] })),
+      criteria: COMPETENCIES.map((c, i) => ({
+        key: c.key,
+        label: c.label,
+        score: scores[i],
+        max: 5,
+        reason: reasons[i],
+      })),
       hadError: false,
     };
   } catch (err) {
     console.error("[grade]", question.id, err.message);
     return {
-      criteria: criteria.map((label) => ({
-        label,
+      criteria: COMPETENCIES.map((c) => ({
+        key: c.key,
+        label: c.label,
         score: 0,
         max: 5,
         reason: "채점 중 오류가 발생했습니다. 평가자의 수동 검토가 필요합니다.",
@@ -149,6 +164,23 @@ async function gradeAnswer(question, rawAnswer) {
       hadError: true,
     };
   }
+}
+
+// 문항별 채점 결과를 역량(competency)별로 합산해 막대그래프용 데이터를 만든다.
+function buildByCompetency(perQuestion) {
+  return COMPETENCIES.map((c) => {
+    let score = 0;
+    let max = 0;
+    perQuestion.forEach((q) => {
+      const found = q.criteria.find((cc) => cc.key === c.key);
+      if (found) {
+        score += found.score;
+        max += found.max;
+      }
+    });
+    const percentage = max > 0 ? Math.round((score / max) * 100) : 0;
+    return { key: c.key, label: c.label, score, max, percentage };
+  });
 }
 
 app.post("/api/submit", async (req, res) => {
@@ -165,7 +197,8 @@ app.post("/api/submit", async (req, res) => {
       answers.map(async (a) => {
         const question = QUESTIONS.find((q) => q.id === Number(a?.questionId));
         if (!question) return null;
-        const result = await gradeAnswer(question, a.answer);
+        const chatLog = (chatLogs && chatLogs[question.id]) || (chatLogs && chatLogs[String(question.id)]) || [];
+        const result = await gradeAnswer(question, a.answer, chatLog);
         const subtotal = result.criteria.reduce((sum, c) => sum + c.score, 0);
         const submax = result.criteria.length * 5;
         return {
@@ -184,8 +217,10 @@ app.post("/api/submit", async (req, res) => {
     const perQuestion = graded.filter(Boolean);
     const totalScore = perQuestion.reduce((sum, g) => sum + g.subtotal, 0);
     const maxScore = perQuestion.reduce((sum, g) => sum + g.submax, 0);
-    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 1000) / 10 : 0;
+    // 총점은 언제나 100점 만점으로 환산해 보여준다 (문항 수에 따라 만점 원점수가 달라지므로).
+    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
     const grade = scoreToGrade(percentage);
+    const byCompetency = buildByCompetency(perQuestion);
     const overall = { totalScore, maxScore, percentage, grade };
 
     const record = {
@@ -197,7 +232,7 @@ app.post("/api/submit", async (req, res) => {
       submittedAt: new Date().toISOString(),
       answers,
       chatLogs: chatLogs || {},
-      grading: { overall, perQuestion },
+      grading: { overall, perQuestion, byCompetency },
     };
 
     // Vercel 등 서버리스 환경은 배포된 코드 디렉터리가 읽기 전용이라 파일 저장이 실패할 수 있다.
@@ -212,7 +247,7 @@ app.post("/api/submit", async (req, res) => {
       console.warn("[/api/submit] 제출 파일 저장 실패 (서버리스 환경에서는 정상일 수 있음):", writeErr.message);
     }
 
-    res.json({ ok: true, overall, perQuestion });
+    res.json({ ok: true, overall, perQuestion, byCompetency });
   } catch (err) {
     console.error("[/api/submit]", err.message);
     res.status(500).json({ error: "채점 처리 중 오류가 발생했습니다." });

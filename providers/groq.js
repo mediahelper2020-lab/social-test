@@ -46,8 +46,14 @@ async function chat({ systemPrompt, history, message }) {
   return text;
 }
 
-function buildGradingPrompt({ scenario, task, criteria, answer }) {
-  const criteriaList = criteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
+function buildGradingPrompt({ scenario, task, rubricContext, competencies, chatLog, answer }) {
+  const rubricList = (rubricContext || []).map((r) => `- ${r}`).join("\n");
+  const competencyList = competencies.map((c, i) => `${i + 1}. ${c.label}: ${c.guide}`).join("\n");
+  const chatText =
+    Array.isArray(chatLog) && chatLog.length > 0
+      ? chatLog.map((t) => `${t.role === "ai" ? "[AI]" : "[응시자]"} ${t.text}`).join("\n")
+      : "(응시자가 AI와 대화하지 않았음)";
+
   return `당신은 사회복지 현장 AI 활용 역량 평가의 엄격하지만 공정한 채점위원입니다.
 
 [사례]
@@ -56,21 +62,27 @@ ${scenario}
 [과업]
 ${task}
 
+[이 문항에서 좋은 답변이 다뤄야 할 내용 (참고용, 직접 채점 기준은 아래 역량 기준을 따를 것)]
+${rubricList}
+
+[응시자가 AI와 나눈 대화 기록 — "프롬프트 활용 역량" 채점 시 참고]
+${chatText}
+
 [응시자 최종 답안]
 ${answer}
 
-아래 ${criteria.length}개의 평가기준 각각에 대해 0~5점(정수)으로 채점하세요.
-${criteriaList}
+아래 ${competencies.length}개의 역량 기준 각각에 대해 0~5점(정수)으로 채점하세요.
+${competencyList}
 
 채점 기준 가이드:
 - 5점: 기준을 충실하고 구체적으로 충족함
 - 3~4점: 부분적으로 충족했으나 구체성/근거가 보완 필요함
 - 1~2점: 형식적으로만 언급했거나 미흡함
-- 0점: 전혀 다루지 않음 (답안이 비어 있거나 무관한 내용인 경우도 0점)
+- 0점: 전혀 다루지 않음 (답안이 비어 있거나 무관한 내용인 경우도 0점, "프롬프트 활용 역량"은 AI와 대화하지 않았다면 0점)
 
 반드시 아래 JSON 형식으로만, 다른 설명 없이 응답하세요:
 {"scores": [정수, 정수, ...], "reasons": ["한 문장 이유", "한 문장 이유", ...]}
-scores와 reasons 배열의 길이는 반드시 ${criteria.length}이어야 하며, 순서는 위 평가기준 순서와 동일해야 합니다.`;
+scores와 reasons 배열의 길이는 반드시 ${competencies.length}이어야 하며, 순서는 위 역량 기준 순서와 동일해야 합니다.`;
 }
 
 function clampScore(n) {
@@ -103,15 +115,16 @@ function parseGradingJson(text, count) {
   return { scores, reasons };
 }
 
-// criteria: string[] (평가기준 문구 배열) / answer: 응시자 답안 텍스트
-// 반환: { scores: number[](0~5), reasons: string[] } (criteria와 같은 길이/순서)
-async function grade({ scenario, task, criteria, answer }) {
+// competencies: [{label, guide}] (5개 고정 역량 기준) / rubricContext: string[] (문항별 참고 맥락)
+// chatLog: [{role:'user'|'ai', text}] / answer: 응시자 답안 텍스트
+// 반환: { scores: number[](0~5), reasons: string[] } (competencies와 같은 길이/순서)
+async function grade({ scenario, task, rubricContext, competencies, chatLog, answer }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error("GROQ_API_KEY가 설정되어 있지 않습니다. .env 파일을 확인하세요.");
   }
 
-  const prompt = buildGradingPrompt({ scenario, task, criteria, answer });
+  const prompt = buildGradingPrompt({ scenario, task, rubricContext, competencies, chatLog, answer });
 
   const res = await fetch(ENDPOINT, {
     method: "POST",
@@ -136,7 +149,7 @@ async function grade({ scenario, task, criteria, answer }) {
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content || "";
   if (!text) throw new Error("채점 응답이 비어 있습니다.");
-  return parseGradingJson(text, criteria.length);
+  return parseGradingJson(text, competencies.length);
 }
 
 module.exports = { chat, grade };

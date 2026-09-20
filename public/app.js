@@ -333,6 +333,7 @@
 
     let overall = null;
     let perQuestion = null;
+    let byCompetency = null;
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
@@ -351,12 +352,13 @@
       if (res.ok) {
         overall = data.overall;
         perQuestion = data.perQuestion;
+        byCompetency = data.byCompetency;
       }
     } catch (err) {
       // 채점 서버 호출이 실패해도 결과 화면은 보여주고 로컬 다운로드는 가능하게 함
     }
 
-    renderResult(answers, overall, perQuestion, auto);
+    renderResult(answers, overall, perQuestion, byCompetency, auto);
     showScreen("result");
   }
 
@@ -368,7 +370,7 @@
     return "grade-f";
   }
 
-  function renderResult(answers, overall, perQuestion, auto) {
+  function renderResult(answers, overall, perQuestion, byCompetency, auto) {
     const notice = $("#result-notice");
     if (auto) {
       notice.hidden = false;
@@ -381,16 +383,18 @@
     if (overall) {
       badge.textContent = overall.grade;
       badge.className = `grade-badge ${gradeClass(overall.grade)}`;
+      $("#score-percentage").textContent = overall.percentage;
       $("#score-total-num").textContent = overall.totalScore;
       $("#score-total-max").textContent = overall.maxScore;
-      $("#score-percentage").textContent = overall.percentage;
     } else {
       badge.textContent = "-";
       badge.className = "grade-badge";
+      $("#score-percentage").textContent = "-";
       $("#score-total-num").textContent = "-";
       $("#score-total-max").textContent = "-";
-      $("#score-percentage").textContent = "채점 실패";
     }
+
+    renderCompetencyChart(byCompetency);
 
     const box = $("#result-breakdown");
     box.innerHTML = "";
@@ -405,11 +409,11 @@
         const div = document.createElement("div");
         div.className = "breakdown-item";
         const rowsHtml = q.criteria
-          .map((c, ci) => {
-            const isPrivacy = ci === q.criteria.length - 1;
+          .map((c) => {
+            const isPrivacy = c.key === "deidentification";
             return `<div class="criterion-row${isPrivacy ? " criterion-privacy" : ""}">
               <div class="criterion-score">${c.score}/${c.max}</div>
-              <div class="criterion-body"><span class="criterion-label">${escapeHtml(isPrivacy ? "🔒 개인정보 비식별 처리" : `기준 ${ci + 1}`)}</span>${escapeHtml(c.reason || "")}</div>
+              <div class="criterion-body"><span class="criterion-label">${escapeHtml(isPrivacy ? "🔒 " + c.label : c.label)}</span>${escapeHtml(c.reason || "")}</div>
             </div>`;
           })
           .join("");
@@ -421,8 +425,44 @@
       });
     }
 
-    state.reportText = buildReportText(answers, overall, perQuestion);
+    state.reportText = buildReportText(answers, overall, perQuestion, byCompetency);
   }
+
+  function renderCompetencyChart(byCompetency) {
+    const chart = $("#competency-chart");
+    const tableBody = $("#competency-table-body");
+    chart.innerHTML = "";
+    tableBody.innerHTML = "";
+
+    if (!byCompetency || byCompetency.length === 0) {
+      chart.innerHTML = '<p class="lead">채점 데이터를 받지 못해 역량별 그래프를 표시할 수 없습니다.</p>';
+      return;
+    }
+
+    byCompetency.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      row.innerHTML = `
+        <div class="bar-row-label">${escapeHtml(c.label)}</div>
+        <div class="bar-row-track"><div class="bar-row-fill" style="width:${c.percentage}%"></div></div>
+        <div class="bar-row-value">${c.percentage}</div>
+      `;
+      chart.appendChild(row);
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(c.label)}</td><td>${c.percentage} / 100</td>`;
+      tableBody.appendChild(tr);
+    });
+  }
+
+  $("#btn-toggle-table").addEventListener("click", () => {
+    const chart = $("#competency-chart");
+    const table = $("#competency-table");
+    const toBar = !table.hidden;
+    table.hidden = toBar;
+    chart.hidden = !toBar;
+    $("#btn-toggle-table").textContent = toBar ? "표로 보기" : "그래프로 보기";
+  });
 
   function escapeHtml(str) {
     const div = document.createElement("div");
@@ -430,15 +470,22 @@
     return div.innerHTML;
   }
 
-  function buildReportText(answers, overall, perQuestion) {
+  function buildReportText(answers, overall, perQuestion, byCompetency) {
     const lines = [];
-    lines.push("사회복지 현장 AI 활용 역량 평가 결과");
+    lines.push("사회복지현장 AI 역량 시험 결과");
     lines.push(`이름: ${state.name}`);
     lines.push(`소속기관/지원분야: ${state.org}`);
     lines.push(`응시 영역: ${state.selectedDomain}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
     if (overall) {
-      lines.push(`총점: ${overall.totalScore} / ${overall.maxScore} (${overall.percentage}점, 등급 ${overall.grade})`);
+      lines.push(`총점: ${overall.percentage} / 100점 (등급 ${overall.grade}, 원점수 ${overall.totalScore}/${overall.maxScore})`);
+    }
+    if (byCompetency && byCompetency.length > 0) {
+      lines.push("");
+      lines.push("[역량별 점수 (100점 환산)]");
+      byCompetency.forEach((c) => {
+        lines.push(`- ${c.label}: ${c.percentage}/100 (원점수 ${c.score}/${c.max})`);
+      });
     }
     lines.push("");
 
@@ -458,9 +505,9 @@
       lines.push("");
       if (g) {
         lines.push("[채점 세부내역]");
-        g.criteria.forEach((c, ci) => {
-          const isPrivacy = ci === g.criteria.length - 1;
-          lines.push(`- ${isPrivacy ? "[개인정보 비식별 처리] " : ""}${c.score}/${c.max}점 — ${c.reason || ""}`);
+        g.criteria.forEach((c) => {
+          const isPrivacy = c.key === "deidentification";
+          lines.push(`- ${isPrivacy ? "[개인정보 비식별 처리] " : `[${c.label}] `}${c.score}/${c.max}점 — ${c.reason || ""}`);
         });
         lines.push("");
       }
