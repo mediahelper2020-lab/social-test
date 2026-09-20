@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const { QUESTIONS, COMPETENCIES } = require("./data/questions");
+const { DOMAINS, COMPETENCIES } = require("./data/domains");
 
 const PORT = process.env.PORT || 3000;
 const AI_PROVIDER = process.env.AI_PROVIDER || "gemini"; // 'gemini' | 'groq'
@@ -15,6 +15,9 @@ const EXAM_MINUTES_PER_QUESTION = parseInt(process.env.EXAM_MINUTES_PER_QUESTION
 const EXAM_MAX_MINUTES = parseInt(process.env.EXAM_MAX_MINUTES || "30", 10);
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_ANSWER_LENGTH = 6000;
+const MAX_SYSTEM_PROMPT_LENGTH = 3000;
+const MAX_SCENARIO_LENGTH = 4000;
+const MAX_TASK_LENGTH = 2000;
 
 const provider = require(`./providers/${AI_PROVIDER}`);
 
@@ -25,16 +28,8 @@ app.use(express.static(path.join(__dirname, "public")));
 // 세션별 남은 AI 호출 횟수 (메모리 저장, 서버 재시작 시 초기화됨)
 const sessions = new Map();
 
-function publicQuestions() {
-  return QUESTIONS.map(({ id, domain, domainColor, type, title, scenario, task }) => ({
-    id,
-    domain,
-    domainColor,
-    type,
-    title,
-    scenario,
-    task,
-  }));
+function findDomain(key) {
+  return DOMAINS.find((d) => d.key === key);
 }
 
 app.get("/api/config", (req, res) => {
@@ -47,8 +42,8 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-app.get("/api/questions", (req, res) => {
-  res.json({ questions: publicQuestions() });
+app.get("/api/domains", (req, res) => {
+  res.json({ domains: DOMAINS.map(({ key, label, color }) => ({ key, label, color })) });
 });
 
 app.post("/api/session/init", (req, res) => {
@@ -57,9 +52,44 @@ app.post("/api/session/init", (req, res) => {
   res.json({ sessionId, remaining: MAX_AI_MESSAGES });
 });
 
+// 현장을 고르면 이 시점에 AI가 문항 3개(사례형 2개 + 문서 자동화 1개)를 새로 출제한다.
+// 같은 현장을 다시 선택해도 매번 새 사례가 나오도록, 문항을 미리 저장해두지 않는다.
+app.post("/api/generate-questions", async (req, res) => {
+  try {
+    const { domain } = req.body || {};
+    const profile = findDomain(domain);
+    if (!profile) {
+      return res.status(400).json({ error: "존재하지 않는 현장입니다." });
+    }
+
+    let generated;
+    try {
+      generated = await provider.generateQuestions(profile);
+    } catch (firstErr) {
+      console.warn("[/api/generate-questions] 1차 시도 실패, 재시도:", firstErr.message);
+      generated = await provider.generateQuestions(profile); // 한 번 재시도
+    }
+
+    const questions = generated.map((q, i) => ({
+      id: `${profile.key}-${i + 1}`,
+      domain: profile.label,
+      domainColor: profile.color,
+      type: q.type,
+      title: q.title,
+      scenario: q.scenario,
+      task: q.task,
+    }));
+
+    res.json({ ok: true, questions, systemPrompt: profile.persona });
+  } catch (err) {
+    console.error("[/api/generate-questions]", err.message);
+    res.status(502).json({ error: "문제를 출제하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
-    const { sessionId, questionId, history, message } = req.body || {};
+    const { sessionId, systemPrompt, history, message } = req.body || {};
 
     if (!sessionId || typeof sessionId !== "string") {
       return res.status(400).json({ error: "세션이 유효하지 않습니다. 페이지를 새로고침해 주세요." });
@@ -70,9 +100,8 @@ app.post("/api/chat", async (req, res) => {
     if (!sessions.has(sessionId)) {
       sessions.set(sessionId, { remaining: MAX_AI_MESSAGES, createdAt: Date.now() });
     }
-    const question = QUESTIONS.find((q) => q.id === Number(questionId));
-    if (!question) {
-      return res.status(400).json({ error: "존재하지 않는 문항입니다." });
+    if (typeof systemPrompt !== "string" || !systemPrompt.trim() || systemPrompt.length > MAX_SYSTEM_PROMPT_LENGTH) {
+      return res.status(400).json({ error: "잘못된 요청입니다. 페이지를 새로고침해 주세요." });
     }
     if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ error: "메시지를 입력해 주세요." });
@@ -89,7 +118,7 @@ app.post("/api/chat", async (req, res) => {
     const safeHistory = Array.isArray(history) ? history.slice(-16) : [];
 
     const reply = await provider.chat({
-      systemPrompt: question.aiSystemPrompt,
+      systemPrompt,
       history: safeHistory,
       message: message.trim(),
     });
@@ -114,8 +143,8 @@ function scoreToGrade(percentage) {
   return "F";
 }
 
-// 모든 문항을 동일한 5개 역량 기준(COMPETENCIES)으로 채점한다. 문항별 rubric은
-// AI에게 "이 문항에서 무엇을 봐야 하는지" 참고 맥락으로만 전달된다.
+// 모든 문항을 동일한 5개 역량 기준(COMPETENCIES)으로 채점한다.
+// question은 { scenario, task } 형태면 충분하다(제출 시 클라이언트가 함께 보내온 값).
 async function gradeAnswer(question, rawAnswer, chatLog) {
   const answer = typeof rawAnswer === "string" ? rawAnswer.trim().slice(0, MAX_ANSWER_LENGTH) : "";
 
@@ -136,7 +165,6 @@ async function gradeAnswer(question, rawAnswer, chatLog) {
     const { scores, reasons } = await provider.grade({
       scenario: question.scenario,
       task: question.task,
-      rubricContext: question.rubric,
       competencies: COMPETENCIES,
       chatLog: Array.isArray(chatLog) ? chatLog.slice(-24) : [],
       answer,
@@ -152,7 +180,7 @@ async function gradeAnswer(question, rawAnswer, chatLog) {
       hadError: false,
     };
   } catch (err) {
-    console.error("[grade]", question.id, err.message);
+    console.error("[grade]", err.message);
     return {
       criteria: COMPETENCIES.map((c) => ({
         key: c.key,
@@ -195,17 +223,20 @@ app.post("/api/submit", async (req, res) => {
 
     const graded = await Promise.all(
       answers.map(async (a) => {
-        const question = QUESTIONS.find((q) => q.id === Number(a?.questionId));
-        if (!question) return null;
-        const chatLog = (chatLogs && chatLogs[question.id]) || (chatLogs && chatLogs[String(question.id)]) || [];
+        if (!a || typeof a.scenario !== "string" || typeof a.task !== "string") return null;
+        const question = {
+          scenario: a.scenario.slice(0, MAX_SCENARIO_LENGTH),
+          task: a.task.slice(0, MAX_TASK_LENGTH),
+        };
+        const chatLog = (chatLogs && chatLogs[a.questionId]) || (chatLogs && chatLogs[String(a.questionId)]) || [];
         const result = await gradeAnswer(question, a.answer, chatLog);
         const subtotal = result.criteria.reduce((sum, c) => sum + c.score, 0);
         const submax = result.criteria.length * 5;
         return {
-          questionId: question.id,
-          domain: question.domain,
-          title: question.title,
-          type: question.type,
+          questionId: a.questionId,
+          domain: a.domain,
+          title: a.title,
+          type: a.type,
           criteria: result.criteria,
           subtotal,
           submax,
@@ -258,7 +289,7 @@ app.post("/api/submit", async (req, res) => {
 // Vercel 등 서버리스 환경에서는 이 파일이 require만 되고 listen은 호출되지 않는다.
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`사회복지 현장 AI 활용 역량 평가 서버가 http://localhost:${PORT} 에서 실행 중입니다. (AI provider: ${AI_PROVIDER})`);
+    console.log(`사회복지현장 AI 역량 시험 서버가 http://localhost:${PORT} 에서 실행 중입니다. (AI provider: ${AI_PROVIDER})`);
   });
 }
 

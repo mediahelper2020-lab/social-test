@@ -2,10 +2,10 @@
   const state = {
     sessionId: null,
     config: null,
-    allQuestions: [], // 서버에서 받은 전체 문항 (모든 영역)
-    domains: [], // [{domain, domainColor, count}]
-    selectedDomain: null,
-    questions: [], // 선택한 영역으로 필터링된 문항
+    domains: [], // [{key, label, color}]
+    selectedDomain: null, // {key, label, color}
+    questions: [], // 이번 시험에서 AI가 출제한 문항 3개
+    systemPrompt: "", // 이번 시험(현장)의 AI 채팅 코치 페르소나
     currentIndex: 0,
     name: "",
     org: "",
@@ -22,7 +22,7 @@
   const screens = {
     start: $("#screen-start"),
     exam: $("#screen-exam"),
-    grading: $("#screen-grading"),
+    loading: $("#screen-loading"),
     result: $("#screen-result"),
   };
 
@@ -31,15 +31,31 @@
     screens[name].classList.add("active");
   }
 
+  function showLoading(title, desc) {
+    $("#loading-title").textContent = title;
+    $("#loading-desc").textContent = desc;
+    $("#loading-desc").hidden = false;
+    $("#loading-error").hidden = true;
+    showScreen("loading");
+  }
+
+  function showLoadingError(message, onRetry) {
+    $("#loading-desc").hidden = true;
+    const errBox = $("#loading-error");
+    errBox.hidden = false;
+    errBox.querySelector(".lead").textContent = message;
+    const retryBtn = $("#btn-loading-retry");
+    retryBtn.onclick = onRetry;
+  }
+
   async function init() {
     try {
-      const [configRes, questionsRes] = await Promise.all([
+      const [configRes, domainsRes] = await Promise.all([
         fetch("/api/config").then((r) => r.json()),
-        fetch("/api/questions").then((r) => r.json()),
+        fetch("/api/domains").then((r) => r.json()),
       ]);
       state.config = configRes;
-      state.allQuestions = questionsRes.questions;
-      state.domains = buildDomainList(state.allQuestions);
+      state.domains = domainsRes.domains;
       renderDomainPicker();
 
       const statusEl = $("#ai-status");
@@ -56,26 +72,15 @@
     }
   }
 
-  function buildDomainList(questions) {
-    const map = new Map();
-    questions.forEach((q) => {
-      if (!map.has(q.domain)) {
-        map.set(q.domain, { domain: q.domain, domainColor: q.domainColor, count: 0 });
-      }
-      map.get(q.domain).count += 1;
-    });
-    return [...map.values()];
-  }
-
   function renderDomainPicker() {
     const picker = $("#domain-picker");
     picker.innerHTML = "";
     state.domains.forEach((d) => {
       const card = document.createElement("div");
       card.className = "domain-card";
-      card.textContent = d.domain;
-      card.dataset.domain = d.domain;
-      card.addEventListener("click", () => selectDomain(d.domain));
+      card.textContent = d.label;
+      card.dataset.key = d.key;
+      card.addEventListener("click", () => selectDomain(d));
       picker.appendChild(card);
     });
   }
@@ -88,17 +93,16 @@
 
   function selectDomain(domain) {
     state.selectedDomain = domain;
-    const info = state.domains.find((d) => d.domain === domain);
 
     document.querySelectorAll(".domain-card").forEach((card) => {
-      const isSelected = card.dataset.domain === domain;
+      const isSelected = card.dataset.key === domain.key;
       card.classList.toggle("selected", isSelected);
-      card.style.background = isSelected ? info.domainColor : "";
-      card.style.borderColor = isSelected ? info.domainColor : "";
+      card.style.background = isSelected ? domain.color : "";
+      card.style.borderColor = isSelected ? domain.color : "";
     });
 
-    const totalMinutes = computeExamMinutes(info.count);
-    $("#domain-hint").textContent = `${domain} · 총 ${info.count}문항 · 제한시간 ${totalMinutes}분`;
+    const totalMinutes = computeExamMinutes(3);
+    $("#domain-hint").textContent = `${domain.label} · 총 3문항(AI 실시간 출제) · 제한시간 ${totalMinutes}분`;
 
     $("#btn-start").disabled = false;
   }
@@ -109,19 +113,40 @@
     state.org = $("#input-org").value.trim();
     if (!state.name || !state.org || !state.selectedDomain) return;
 
-    state.questions = state.allQuestions.filter((q) => q.domain === state.selectedDomain);
-
-    const btn = $("#btn-start");
-    btn.disabled = true;
-    btn.textContent = "준비 중...";
-
     try {
       const res = await fetch("/api/session/init", { method: "POST" });
       const data = await res.json();
       state.sessionId = data.sessionId;
       state.remaining = data.remaining;
       state.startedAt = new Date().toISOString();
+    } catch (err) {
+      alert("세션을 시작하지 못했습니다. 다시 시도해 주세요.");
+      return;
+    }
 
+    await generateAndStart();
+  });
+
+  async function generateAndStart() {
+    const domain = state.selectedDomain;
+    showLoading(
+      "AI가 맞춤 문제를 출제하고 있습니다...",
+      `${domain.label} 현장에 맞는 시험 문항 3개를 새로 준비하는 중입니다. 10~30초 정도 걸릴 수 있습니다.`
+    );
+
+    try {
+      const res = await fetch("/api/generate-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: domain.key }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "문제를 출제하지 못했습니다.");
+
+      state.questions = data.questions;
+      state.systemPrompt = data.systemPrompt;
+      state.answers = {};
+      state.chatLogs = {};
       state.questions.forEach((q) => {
         state.chatLogs[q.id] = [];
       });
@@ -129,14 +154,12 @@
       renderNav();
       loadQuestion(0);
       startTimer(computeExamMinutes(state.questions.length));
-      $("#candidate-info").textContent = `${state.name} · ${state.org} · ${state.selectedDomain}`;
+      $("#candidate-info").textContent = `${state.name} · ${state.org} · ${domain.label}`;
       showScreen("exam");
     } catch (err) {
-      alert("세션을 시작하지 못했습니다. 다시 시도해 주세요.");
-      btn.disabled = false;
-      btn.textContent = "시험 시작하기";
+      showLoadingError(err.message || "문제를 출제하지 못했습니다. 다시 시도해 주세요.", generateAndStart);
     }
-  });
+  }
 
   function startTimer(minutes) {
     state.endTime = Date.now() + minutes * 60 * 1000;
@@ -281,7 +304,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: state.sessionId,
-          questionId: q.id,
+          systemPrompt: state.systemPrompt,
           history: historyBefore,
           message,
         }),
@@ -324,12 +347,13 @@
       questionId: q.id,
       domain: q.domain,
       title: q.title,
+      type: q.type,
       scenario: q.scenario,
       task: q.task,
       answer: state.answers[q.id] || "",
     }));
 
-    showScreen("grading");
+    showLoading("AI가 답안을 채점하고 있습니다...", "문항별 평가기준에 따라 세부 점수를 산정하는 중입니다. 잠시만 기다려 주세요.");
 
     let overall = null;
     let perQuestion = null;
@@ -342,7 +366,7 @@
           sessionId: state.sessionId,
           name: state.name,
           org: state.org,
-          domain: state.selectedDomain,
+          domain: state.selectedDomain?.label,
           startedAt: state.startedAt,
           answers,
           chatLogs: state.chatLogs,
@@ -487,7 +511,7 @@
     lines.push("사회복지현장 AI 역량 시험 결과");
     lines.push(`이름: ${state.name}`);
     lines.push(`소속기관/지원분야: ${state.org}`);
-    lines.push(`응시 영역: ${state.selectedDomain}`);
+    lines.push(`응시 영역: ${state.selectedDomain?.label || ""}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
     if (overall) {
       lines.push(`총점: ${overall.percentage} / 100점 (등급 ${overall.grade}, 원점수 ${overall.totalScore}/${overall.maxScore})`);

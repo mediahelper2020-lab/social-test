@@ -461,8 +461,8 @@ h1, h2, h3, h4 { font-family: inherit; }
 }
 .ai-form textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(91, 141, 255, 0.12); }
 
-/* ---------- 채점 중 화면 ---------- */
-#screen-grading.active {
+/* ---------- 로딩 화면 (출제 중 / 채점 중) ---------- */
+#screen-loading.active {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -472,7 +472,7 @@ h1, h2, h3, h4 { font-family: inherit; }
   text-align: center;
   gap: 6px;
 }
-.grading-card { display: flex; flex-direction: column; align-items: center; gap: 18px; max-width: 420px; }
+.grading-card { display: flex; flex-direction: column; align-items: center; gap: 18px; max-width: 440px; }
 .grading-card h2 { font-size: 19px; font-weight: 800; margin: 0; }
 .spinner {
   width: 48px;
@@ -485,6 +485,8 @@ h1, h2, h3, h4 { font-family: inherit; }
   filter: drop-shadow(0 0 10px rgba(91, 141, 255, 0.4));
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.loading-error { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 6px; }
+.loading-error .lead { color: var(--danger); }
 
 /* ---------- 결과 화면 ---------- */
 #screen-result.active { display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px; }
