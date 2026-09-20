@@ -918,11 +918,6 @@ input[type="text"]:focus, input[type="search"]:focus {
 .custom-domain-input::placeholder { color: var(--text-3); }
 .custom-domain-help { margin-top: 7px; font-size: 12px; color: var(--text-3); line-height: 1.6; }
 
-/* ---------- AI 활용 기록 ---------- */
-.block-sub { font-size: 12.5px; line-height: 1.7; color: var(--text-3); margin: -2px 0 10px; }
-.block-sub b { color: var(--text-2); font-weight: 650; }
-.q-ailog textarea { min-height: 150px; }
-
 /* ---------- 개인정보 입력 경고 ---------- */
 .pii-alert {
   margin: 0 14px 10px;

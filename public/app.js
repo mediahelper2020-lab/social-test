@@ -10,8 +10,7 @@
     name: "",
     org: "",
     startedAt: null,
-    answers: {}, // questionId -> string (최종 답안)
-    aiLogs: {}, // questionId -> string (AI 활용 기록)
+    answers: {}, // questionId -> string
     chatLogs: {}, // questionId -> [{role:'user'|'ai', text}]
     remaining: 0,
     endTime: null,
@@ -212,7 +211,6 @@
 
       state.questions = data.questions;
       state.answers = {};
-      state.aiLogs = {};
       state.chatLogs = {};
       state.questions.forEach((q) => {
         state.chatLogs[q.id] = [];
@@ -357,8 +355,6 @@
   function updateCharCount() {
     const len = $("#q-answer").value.trim().length;
     $("#char-count").textContent = `${len.toLocaleString("ko-KR")}자`;
-    const logLen = $("#q-ailog").value.trim().length;
-    $("#ailog-count").textContent = `${logLen.toLocaleString("ko-KR")}자`;
   }
 
   function loadQuestion(idx) {
@@ -370,13 +366,15 @@
 
     $("#q-domain-badge").textContent = q.domain;
     $("#q-domain-badge").style.background = q.domainColor;
+    // 문항 유형: 현장 판단 / 실무 작성 / 업무 자동화 설계
+    const TYPE_LABEL = { writing: "실무 작성", document: "업무 자동화 설계" };
     const typeBadge = $("#q-type-badge");
-    typeBadge.hidden = q.type !== "document";
+    typeBadge.textContent = TYPE_LABEL[q.type] || "";
+    typeBadge.hidden = !TYPE_LABEL[q.type];
     $("#q-title").textContent = q.title;
     $("#q-scenario").textContent = q.scenario;
     $("#q-task").textContent = q.task;
     $("#q-answer").value = state.answers[q.id] || "";
-    $("#q-ailog").value = state.aiLogs[q.id] || "";
     $("#q-counter").textContent = `문항 ${idx + 1} / ${state.questions.length}`;
 
     $("#btn-prev").disabled = idx === 0;
@@ -395,15 +393,12 @@
     const q = state.questions[state.currentIndex];
     if (!q) return;
     state.answers[q.id] = $("#q-answer").value;
-    state.aiLogs[q.id] = $("#q-ailog").value;
   }
 
-  ["#q-answer", "#q-ailog"].forEach((sel) => {
-    $(sel).addEventListener("input", () => {
-      saveCurrentAnswer();
-      refreshNavState();
-      updateCharCount();
-    });
+  $("#q-answer").addEventListener("input", () => {
+    saveCurrentAnswer();
+    refreshNavState();
+    updateCharCount();
   });
 
   $("#btn-prev").addEventListener("click", () => {
@@ -550,7 +545,6 @@
     const answers = state.questions.map((q) => ({
       token: q.token,
       answer: state.answers[q.id] || "",
-      aiLog: state.aiLogs[q.id] || "",
     }));
 
     showLoading("AI가 답안을 채점하고 있습니다...", "문항별 평가기준에 따라 세부 점수를 산정하는 중입니다. 잠시만 기다려 주세요.");
@@ -681,7 +675,7 @@
 
         const rowsHtml = q.criteria
           .map((c) => {
-            const isPrivacy = c.key === "dataProtection";
+            const isPrivacy = c.key === "ethics";
             const lines = [];
             if (c.evidence) {
               lines.push(`<p class="criterion-line ev"><b>확인된 내용</b>${escapeHtml(c.evidence)}</p>`);
@@ -714,7 +708,7 @@
             ? `<div class="pii-verdict">
                  <b>AI 입력값에서 개인식별정보가 검출되었습니다</b>
                  ${escapeHtml(q.piiFindings.map((f) => `${f.type} ${f.count}건`).join(", "))} —
-                 기계 검사로 확인된 사항이며 '정보보호 실행' 감점의 확정 근거입니다.
+                 기계 검사로 확인된 사항이며 '정보보호와 윤리' 감점의 확정 근거입니다.
                </div>`
             : "";
 
@@ -815,9 +809,6 @@
       lines.push("");
       lines.push("[최종 답안]");
       lines.push(state.answers[q.id] || "(작성하지 않음)");
-      lines.push("");
-      lines.push("[AI 활용 기록]");
-      lines.push(state.aiLogs[q.id] || "(작성하지 않음)");
       lines.push("");
       if (g && g.piiFindings && g.piiFindings.length > 0) {
         lines.push("[개인정보 기계 검사 - AI 입력값]");

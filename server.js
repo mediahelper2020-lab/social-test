@@ -19,7 +19,6 @@ const MAX_MESSAGE_LENGTH = 2000;
 const MAX_ANSWER_LENGTH = 6000;
 // 페르소나에 문항별 함정 지시문이 붙어 길어진다.
 const MAX_SYSTEM_PROMPT_LENGTH = 5000;
-const MAX_AI_LOG_LENGTH = 3000;
 const MAX_CUSTOM_LABEL_LENGTH = 40;
 const MAX_SCENARIO_LENGTH = 4000;
 const MAX_TASK_LENGTH = 2000;
@@ -233,9 +232,8 @@ function scoreToGrade(percentage) {
 // 모든 문항을 동일한 5개 역량 기준(COMPETENCIES)으로 채점한다.
 // question은 { scenario, task } 형태면 충분하다(제출 시 클라이언트가 함께 보내온 값).
 // 반환: { criteria, summary, hadError, errorMessage }
-async function gradeAnswer(question, rawAnswer, rawAiLog, chatLog, piiFindings) {
+async function gradeAnswer(question, rawAnswer, chatLog, piiFindings) {
   const answer = typeof rawAnswer === "string" ? rawAnswer.trim().slice(0, MAX_ANSWER_LENGTH) : "";
-  const aiLog = typeof rawAiLog === "string" ? rawAiLog.trim().slice(0, MAX_AI_LOG_LENGTH) : "";
 
   if (!answer) {
     return {
@@ -247,8 +245,8 @@ async function gradeAnswer(question, rawAnswer, rawAiLog, chatLog, piiFindings) 
         evidence: "답안이 비어 있어 확인할 내용이 없습니다.",
         missing: `${c.label}을(를) 평가할 근거가 전혀 없습니다. ${c.guide}`,
         improve:
-          "제한 시간 안에 짧게라도 (1) 본인의 판단과 실행 계획, (2) AI 제안 중 그대로 따르면 안 되는 부분, " +
-          "(3) AI에게 맡긴 일과 본인이 판단한 일의 구분을 적어 주세요.",
+          "제한 시간 안에 짧게라도 AI와 논의한 내용을 바탕으로 이 사례에 맞는 실행 계획을 " +
+          "누가·언제·무엇을 하는지까지 적어 주세요.",
       })),
       summary: "답안을 작성하지 않아 모든 역량에서 0점 처리되었습니다.",
       hadError: false,
@@ -267,7 +265,6 @@ async function gradeAnswer(question, rawAnswer, rawAiLog, chatLog, piiFindings) 
         competencies: COMPETENCIES,
         chatLog: Array.isArray(chatLog) ? chatLog.slice(-24) : [],
         answer,
-        aiLog,
         trap: question.trap,
         piiFindings,
       });
@@ -349,7 +346,7 @@ app.post("/api/submit", async (req, res) => {
         // 응시자가 AI에게 무엇을 입력했는지 기계로 검사한다. 채점 AI의 주관적 판단과 별개로
         // 확정 증거를 남기기 위한 것이며, 검사 대상은 응시자가 친 글뿐이다.
         const piiFindings = PII.summarize(PII.scanChatLog(chatLog));
-        const result = await gradeAnswer(question, a.answer, a.aiLog, chatLog, piiFindings);
+        const result = await gradeAnswer(question, a.answer, chatLog, piiFindings);
         const subtotal = result.criteria.reduce((sum, c) => sum + c.score, 0);
         // 채점에 실패한 문항은 만점(submax)도 0이라 총점 환산에서 통째로 빠진다.
         // 0점으로 처리하면 응시자 잘못이 아닌 이유로 등급이 떨어지기 때문이다.
@@ -403,7 +400,6 @@ app.post("/api/submit", async (req, res) => {
           task: sealed.task,
           trap: sealed.trap || null,
           answer: a && a.answer,
-          aiLog: a && a.aiLog,
         };
       }),
       chatLogs: chatLogs || {},

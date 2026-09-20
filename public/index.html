@@ -24,9 +24,9 @@
         입력할 수 있고, 같은 현장을 다시 응시해도 매번 다른 문제가 나옵니다.
       </p>
       <p class="lead">
-        좋은 답안은 AI가 대신 써줍니다. 그래서 이 시험은 답안의 완성도가 아니라
-        <strong>AI를 쓰면서 사고를 내지 않는가</strong>를 봅니다. AI 어시스트는 대화 중
-        <strong>일부러 잘못된 제안</strong>을 섞어 넣으며, 그것을 걸러내는지가 채점 대상입니다.
+        신입 사회복지사 채용을 위한 시험입니다. 현장 경력이나 제도 암기를 묻지 않습니다.
+        <strong>AI에게 일을 시키고 → 걸러내고 → 현장에 맞게 다듬고 → 정보를 지키고 →
+        반복 업무로 만드는</strong> 다섯 단계를 실제로 해낼 수 있는지를 봅니다.
       </p>
     </header>
 
@@ -34,12 +34,13 @@
       <div class="feature-tile">
         <span class="feature-num">3</span>
         <h3>실시간 출제 문항</h3>
-        <p>사례형 2문항 + 반복 문서를 AI에게 맡기는 <strong>맞춤 지침 설계</strong> 1문항</p>
+        <p>신입이 입사 첫 달에 맡는 일 — <strong>현장 판단</strong> · <strong>실무 작성</strong> ·
+          <strong>업무 자동화 설계</strong> 각 1문항</p>
       </div>
       <div class="feature-tile">
         <span class="feature-num">5</span>
         <h3>평가 역량</h3>
-        <p>검증 · 정보보호 실행 · <strong>AI 사용 경계 판단</strong> · 당사자 권익 보호 · 업무 재설계</p>
+        <p>AI 업무 지시 · 검증과 사실확인 · <strong>현장 적용력</strong> · 정보보호와 윤리 · 업무 재설계</p>
       </div>
       <div class="feature-tile">
         <span class="feature-num">30<small>분</small></span>
@@ -126,7 +127,7 @@
         <div class="q-header">
           <div class="q-meta">
             <span id="q-domain-badge" class="domain-badge"></span>
-            <span id="q-type-badge" class="type-badge" hidden>문서 자동화</span>
+            <span id="q-type-badge" class="type-badge" hidden></span>
             <span id="q-counter" class="q-counter"></span>
           </div>
           <h2 id="q-title"></h2>
@@ -147,22 +148,7 @@
             <h3 class="block-label">최종 답안</h3>
             <span id="char-count" class="char-count">0자</span>
           </div>
-          <textarea id="q-answer" placeholder="당신의 최종 판단과 실행 계획을 작성하세요."></textarea>
-        </section>
-
-        <section class="q-block q-ailog">
-          <div class="block-label-row">
-            <h3 class="block-label">AI 활용 기록</h3>
-            <span id="ailog-count" class="char-count">0자</span>
-          </div>
-          <p class="block-sub">
-            현장에서 "AI가 그랬어요"는 통하지 않습니다. 아래 세 가지를 구분해 적으세요.
-            <b>이 칸은 'AI 사용 경계 판단' 역량의 주된 채점 근거입니다.</b>
-          </p>
-          <textarea
-            id="q-ailog"
-            placeholder="① AI에게 맡긴 일:&#10;② 내가 직접 판단한 일:&#10;③ AI 답변 중 그대로 따르면 안 되는 부분 / 반드시 확인해야 할 것:"
-          ></textarea>
+          <textarea id="q-answer" placeholder="AI와 논의한 내용을 바탕으로, 이 현장에서 실제로 쓸 수 있는 결과물을 작성하세요."></textarea>
         </section>
 
         <div class="q-controls">
