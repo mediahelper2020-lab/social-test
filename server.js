@@ -152,6 +152,7 @@ function scoreToGrade(percentage) {
 
 // 모든 문항을 동일한 5개 역량 기준(COMPETENCIES)으로 채점한다.
 // question은 { scenario, task } 형태면 충분하다(제출 시 클라이언트가 함께 보내온 값).
+// 반환: { criteria, summary, hadError, errorMessage }
 async function gradeAnswer(question, rawAnswer, chatLog) {
   const answer = typeof rawAnswer === "string" ? rawAnswer.trim().slice(0, MAX_ANSWER_LENGTH) : "";
 
@@ -162,46 +163,66 @@ async function gradeAnswer(question, rawAnswer, chatLog) {
         label: c.label,
         score: 0,
         max: 5,
-        reason: "답안을 작성하지 않았습니다.",
+        evidence: "답안이 비어 있어 확인할 내용이 없습니다.",
+        missing: `${c.label}을(를) 평가할 근거가 전혀 없습니다. ${c.guide}`,
+        improve: "제한 시간 안에 짧게라도 (1) 상황 판단, (2) 개입 전략, (3) 실행 계획 순서로 답안을 작성해 주세요.",
       })),
+      summary: "답안을 작성하지 않아 모든 역량에서 0점 처리되었습니다.",
       hadError: false,
     };
   }
 
-  try {
-    const { scores, reasons } = await provider.grade({
-      scenario: question.scenario,
-      task: question.task,
-      competencies: COMPETENCIES,
-      chatLog: Array.isArray(chatLog) ? chatLog.slice(-24) : [],
-      answer,
-    });
+  // 일시적인 과부하(503)나 분당 요청 제한(429), 간헐적인 JSON 형식 오류 때문에
+  // 채점이 통째로 실패하는 일이 있어, 출제와 마찬가지로 몇 번 재시도한다.
+  let result;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      result = await provider.grade({
+        scenario: question.scenario,
+        task: question.task,
+        competencies: COMPETENCIES,
+        chatLog: Array.isArray(chatLog) ? chatLog.slice(-24) : [],
+        answer,
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[grade] ${attempt}차 시도 실패:`, err.message);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1200));
+    }
+  }
+
+  if (!result) {
+    console.error("[grade] 최종 실패:", lastErr?.message);
     return {
-      criteria: COMPETENCIES.map((c, i) => ({
-        key: c.key,
-        label: c.label,
-        score: scores[i],
-        max: 5,
-        reason: reasons[i],
-      })),
-      hadError: false,
-    };
-  } catch (err) {
-    console.error("[grade]", err.message);
-    return {
-      criteria: COMPETENCIES.map((c) => ({
-        key: c.key,
-        label: c.label,
-        score: 0,
-        max: 5,
-        reason: "채점 중 오류가 발생했습니다. 평가자의 수동 검토가 필요합니다.",
-      })),
+      criteria: [],
+      summary: "",
       hadError: true,
+      errorMessage: lastErr?.message || "알 수 없는 오류",
     };
   }
+
+  return {
+    criteria: COMPETENCIES.map((c, i) => {
+      const item = result.items[i] || {};
+      return {
+        key: c.key,
+        label: c.label,
+        score: item.score || 0,
+        max: 5,
+        evidence: item.evidence || "",
+        missing: item.missing || "",
+        improve: item.improve || "",
+      };
+    }),
+    summary: result.summary || "",
+    hadError: false,
+  };
 }
 
 // 문항별 채점 결과를 역량(competency)별로 합산해 막대그래프용 데이터를 만든다.
+// 채점에 실패한 문항은 criteria가 비어 있어 합산에서 자연히 빠진다(0점으로 깎지 않는다).
 function buildByCompetency(perQuestion) {
   return COMPETENCIES.map((c) => {
     let score = 0;
@@ -238,6 +259,8 @@ app.post("/api/submit", async (req, res) => {
         const chatLog = (chatLogs && chatLogs[a.questionId]) || (chatLogs && chatLogs[String(a.questionId)]) || [];
         const result = await gradeAnswer(question, a.answer, chatLog);
         const subtotal = result.criteria.reduce((sum, c) => sum + c.score, 0);
+        // 채점에 실패한 문항은 만점(submax)도 0이라 총점 환산에서 통째로 빠진다.
+        // 0점으로 처리하면 응시자 잘못이 아닌 이유로 등급이 떨어지기 때문이다.
         const submax = result.criteria.length * 5;
         return {
           questionId: a.questionId,
@@ -245,9 +268,11 @@ app.post("/api/submit", async (req, res) => {
           title: a.title,
           type: a.type,
           criteria: result.criteria,
+          summary: result.summary,
           subtotal,
           submax,
           hadError: result.hadError,
+          errorMessage: result.errorMessage,
         };
       })
     );
@@ -259,7 +284,8 @@ app.post("/api/submit", async (req, res) => {
     const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
     const grade = scoreToGrade(percentage);
     const byCompetency = buildByCompetency(perQuestion);
-    const overall = { totalScore, maxScore, percentage, grade };
+    const ungradedCount = perQuestion.filter((q) => q.hadError).length;
+    const overall = { totalScore, maxScore, percentage, grade, ungradedCount };
 
     const record = {
       sessionId,

@@ -46,8 +46,7 @@ async function chat({ systemPrompt, history, message }) {
   return text;
 }
 
-function buildGradingPrompt({ scenario, task, rubricContext, competencies, chatLog, answer }) {
-  const rubricList = (rubricContext || []).map((r) => `- ${r}`).join("\n");
+function buildGradingPrompt({ scenario, task, competencies, chatLog, answer }) {
   const competencyList = competencies.map((c, i) => `${i + 1}. ${c.label}: ${c.guide}`).join("\n");
   const chatText =
     Array.isArray(chatLog) && chatLog.length > 0
@@ -55,6 +54,8 @@ function buildGradingPrompt({ scenario, task, rubricContext, competencies, chatL
       : "(응시자가 AI와 대화하지 않았음)";
 
   return `당신은 사회복지 현장 AI 활용 역량 평가의 엄격하지만 공정한 채점위원입니다.
+응시자는 채점 결과만 보고 스스로 무엇을 보완해야 하는지 알 수 있어야 하므로,
+"부족합니다" 같은 막연한 말 대신 어느 대목이 왜 부족한지를 답안 내용을 짚어가며 설명해야 합니다.
 
 [사례]
 ${scenario}
@@ -62,10 +63,7 @@ ${scenario}
 [과업]
 ${task}
 
-[이 문항에서 좋은 답변이 다뤄야 할 내용 (참고용, 직접 채점 기준은 아래 역량 기준을 따를 것)]
-${rubricList}
-
-[응시자가 AI와 나눈 대화 기록 — "프롬프트 활용 역량" 채점 시 참고]
+[응시자가 AI와 나눈 대화 기록 — "프롬프트 활용 역량" 채점 시 근거로 삼을 것]
 ${chatText}
 
 [응시자 최종 답안]
@@ -74,16 +72,47 @@ ${answer}
 아래 ${competencies.length}개의 역량 기준 각각에 대해 0~5점(정수)으로 채점하세요.
 ${competencyList}
 
-채점 기준 가이드:
+점수 기준:
 - 5점: 기준을 충실하고 구체적으로 충족함
-- 3~4점: 부분적으로 충족했으나 구체성/근거가 보완 필요함
-- 1~2점: 형식적으로만 언급했거나 미흡함
-- 0점: 전혀 다루지 않음 (답안이 비어 있거나 무관한 내용인 경우도 0점, "프롬프트 활용 역량"은 AI와 대화하지 않았다면 0점)
+- 3~4점: 방향은 맞으나 구체성·근거가 부족함
+- 1~2점: 형식적으로만 언급했거나 현저히 미흡함
+- 0점: 전혀 다루지 않음 (답안이 비어 있거나 과업과 무관한 경우도 0점.
+  "프롬프트 활용 역량"은 위 대화 기록이 "(응시자가 AI와 대화하지 않았음)"이면 0점)
 
-반드시 아래 JSON 형식으로만, 다른 설명 없이 응답하세요:
-{"scores": [정수, 정수, ...], "reasons": ["한 문장 이유", "한 문장 이유", ...]}
-scores와 reasons 배열의 길이는 반드시 ${competencies.length}이어야 하며, 순서는 위 역량 기준 순서와 동일해야 합니다.`;
+역량마다 아래 세 가지를 모두 작성하세요. 한국어 존댓말로 쓰고, 답안에 실제로 등장한
+표현이나 항목을 인용해 근거를 밝히세요.
+- evidence: 답안에서 확인된 내용과 잘한 점. 1~2문장. (0점이면 "해당 내용을 찾을 수 없습니다." 로 시작)
+- missing: 점수가 깎인 이유. 어떤 항목이 빠졌는지, 어느 서술이 왜 불충분한지 구체적으로
+  2~3문장으로 지적할 것. 5점이면 "감점 요인은 없습니다."로 시작해 더 강화할 부분을 덧붙일 것.
+- improve: 다음에 어떻게 쓰면 점수가 올라가는지. 실제로 답안에 넣을 만한 문장이나 항목을
+  예시로 들어 1~2문장으로 제시할 것.
+
+summary에는 이 문항 전체에 대한 총평을 3~4문장으로 작성하세요. 가장 점수가 낮은 역량이
+무엇이고 그것이 왜 낮은지, 우선 무엇부터 보완해야 하는지를 포함하세요.
+
+items 배열의 길이는 반드시 ${competencies.length}이어야 하며, 순서는 위 역량 기준 순서와 같아야 합니다.`;
 }
+
+const GRADING_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          score: { type: "integer" },
+          evidence: { type: "string" },
+          missing: { type: "string" },
+          improve: { type: "string" },
+        },
+        required: ["score", "evidence", "missing", "improve"],
+      },
+    },
+  },
+  required: ["summary", "items"],
+};
 
 function clampScore(n) {
   const num = Math.round(Number(n));
@@ -91,40 +120,45 @@ function clampScore(n) {
   return Math.min(5, Math.max(0, num));
 }
 
-function parseGradingJson(text, count) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        parsed = JSON.parse(match[0]);
-      } catch {
-        // fall through, handled below
-      }
-    }
+// 모델이 items 대신 다른 키를 쓰거나 배열을 그대로 주는 경우까지 받아준다.
+function pickGradingArray(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return null;
+  for (const key of ["items", "criteria", "results", "scores", "역량"]) {
+    if (Array.isArray(parsed[key])) return parsed[key];
   }
-  if (!parsed || !Array.isArray(parsed.scores)) {
-    throw new Error("채점 응답을 JSON으로 해석하지 못했습니다.");
-  }
-  const scores = Array.from({ length: count }, (_, i) => clampScore(parsed.scores[i]));
-  const reasons = Array.from({ length: count }, (_, i) =>
-    String(parsed.reasons?.[i] ?? "").slice(0, 300)
-  );
-  return { scores, reasons };
+  return Object.values(parsed).find((v) => Array.isArray(v)) || null;
 }
 
-// competencies: [{label, guide}] (5개 고정 역량 기준) / rubricContext: string[] (문항별 참고 맥락)
+function parseGradingJson(text, count) {
+  const parsed = extractJsonObject(text);
+  const arr = pickGradingArray(parsed);
+  if (!arr || arr.length === 0) {
+    throw new Error("채점 응답을 JSON으로 해석하지 못했습니다.");
+  }
+  const items = Array.from({ length: count }, (_, i) => {
+    const it = arr[i] || {};
+    return {
+      score: clampScore(typeof it === "number" ? it : it.score),
+      evidence: String(it.evidence || "").trim().slice(0, 500),
+      missing: String(it.missing || it.reason || "").trim().slice(0, 700),
+      improve: String(it.improve || "").trim().slice(0, 500),
+    };
+  });
+  return { summary: String(parsed?.summary || "").trim().slice(0, 900), items };
+}
+
+// competencies: [{label, guide}] (5개 고정 역량 기준)
 // chatLog: [{role:'user'|'ai', text}] / answer: 응시자 답안 텍스트
-// 반환: { scores: number[](0~5), reasons: string[] } (competencies와 같은 길이/순서)
-async function grade({ scenario, task, rubricContext, competencies, chatLog, answer }) {
+// 반환: { summary, items: [{score(0~5), evidence, missing, improve}] }
+//        items는 competencies와 같은 길이·순서.
+async function grade({ scenario, task, competencies, chatLog, answer }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error("GROQ_API_KEY가 설정되어 있지 않습니다. .env 파일을 확인하세요.");
   }
 
-  const prompt = buildGradingPrompt({ scenario, task, rubricContext, competencies, chatLog, answer });
+  const prompt = buildGradingPrompt({ scenario, task, competencies, chatLog, answer });
 
   const res = await fetch(ENDPOINT, {
     method: "POST",
@@ -134,9 +168,15 @@ async function grade({ scenario, task, rubricContext, competencies, chatLog, ans
     },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        {
+          role: "user",
+          content: `${prompt}\n\n반드시 아래 JSON 형식으로만 응답하세요:\n${JSON.stringify(GRADING_SCHEMA)}`,
+        },
+      ],
       temperature: 0.2,
-      max_tokens: 1200,
+      // 역량 5개 × (확인된 내용 + 미흡한 점 + 보완 방법) + 총평이라 출력이 길다.
+      max_tokens: 6000,
       response_format: { type: "json_object" },
     }),
   });
@@ -147,8 +187,12 @@ async function grade({ scenario, task, rubricContext, competencies, chatLog, ans
   }
 
   const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content || "";
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content || "";
   if (!text) throw new Error("채점 응답이 비어 있습니다.");
+  if (choice?.finish_reason === "length") {
+    throw new Error("채점 응답이 길이 제한으로 잘렸습니다.");
+  }
   return parseGradingJson(text, competencies.length);
 }
 

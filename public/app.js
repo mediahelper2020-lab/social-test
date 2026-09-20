@@ -534,12 +534,33 @@
     return "grade-f";
   }
 
+  // 0~5점을 "왜 이 점수인지"가 바로 읽히도록 구간 라벨로 바꾼다.
+  function scoreLevelLabel(score) {
+    if (score >= 5) return "우수";
+    if (score >= 4) return "양호";
+    if (score >= 3) return "보통";
+    if (score >= 1) return "미흡";
+    return "해당 없음";
+  }
+
+  function scoreLevelClass(score) {
+    if (score >= 4) return "lv-good";
+    if (score >= 3) return "lv-mid";
+    return "lv-low";
+  }
+
   function renderResult(answers, overall, perQuestion, byCompetency, auto) {
     const notice = $("#result-notice");
     const notes = [];
     if (auto) notes.push("제한 시간이 종료되어 자동 제출되었습니다.");
     if (state.leaveCount > 0) {
       notes.push(`시험 중 다른 화면으로 이동한 기록이 ${state.leaveCount}회 있습니다 (평가자에게 함께 전달됩니다).`);
+    }
+    if (overall?.ungradedCount > 0) {
+      notes.push(
+        `${overall.ungradedCount}개 문항은 AI 채점 서버 오류로 채점되지 않아 총점 계산에서 제외되었습니다. ` +
+          "해당 문항은 답안을 내려받아 평가자에게 전달해 주세요."
+      );
     }
     notice.hidden = notes.length === 0;
     notice.textContent = notes.join(" ");
@@ -573,19 +594,57 @@
       perQuestion.forEach((q, idx) => {
         const div = document.createElement("div");
         div.className = "breakdown-item";
+        const head = `<div class="breakdown-item-head">
+            <h4>${idx + 1}. [${escapeHtml(q.domain)}] ${escapeHtml(q.title)}</h4>
+            <span class="breakdown-subscore${q.hadError ? " is-ungraded" : ""}">${
+              q.hadError ? "채점 보류" : `${q.subtotal} / ${q.submax}점`
+            }</span>
+          </div>`;
+
+        if (q.hadError) {
+          // 채점 실패는 응시자 잘못이 아니므로 0점이 아니라 "보류"로 안내하고 총점에서도 제외한다.
+          div.innerHTML = `${head}
+            <div class="criterion-error">
+              <strong>이 문항은 자동 채점이 완료되지 않았습니다.</strong>
+              AI 채점 서버가 일시적으로 응답하지 않아 세 번의 재시도 뒤에도 결과를 받지 못했습니다.
+              이 문항은 총점 계산에서 제외되었으며, 아래 버튼으로 답안을 내려받아 평가자에게 전달하면
+              수동으로 채점할 수 있습니다.
+            </div>`;
+          box.appendChild(div);
+          return;
+        }
+
         const rowsHtml = q.criteria
           .map((c) => {
             const isPrivacy = c.key === "deidentification";
+            const lines = [];
+            if (c.evidence) {
+              lines.push(`<p class="criterion-line ev"><b>확인된 내용</b>${escapeHtml(c.evidence)}</p>`);
+            }
+            if (c.missing) {
+              lines.push(`<p class="criterion-line miss"><b>미흡한 점</b>${escapeHtml(c.missing)}</p>`);
+            }
+            if (c.improve) {
+              lines.push(`<p class="criterion-line tip"><b>이렇게 보완하세요</b>${escapeHtml(c.improve)}</p>`);
+            }
             return `<div class="criterion-row${isPrivacy ? " criterion-privacy" : ""}">
-              <div class="criterion-score">${c.score}/${c.max}</div>
-              <div class="criterion-body"><span class="criterion-label">${escapeHtml(isPrivacy ? "🔒 " + c.label : c.label)}</span>${escapeHtml(c.reason || "")}</div>
+              <div class="criterion-score ${scoreLevelClass(c.score)}">
+                <span class="criterion-score-num">${c.score}<small>/${c.max}</small></span>
+                <span class="criterion-score-tag">${scoreLevelLabel(c.score)}</span>
+              </div>
+              <div class="criterion-body">
+                <span class="criterion-label">${escapeHtml(isPrivacy ? "🔒 " + c.label : c.label)}</span>
+                ${lines.join("")}
+              </div>
             </div>`;
           })
           .join("");
-        div.innerHTML = `<div class="breakdown-item-head">
-            <h4>${idx + 1}. [${escapeHtml(q.domain)}] ${escapeHtml(q.title)}</h4>
-            <span class="breakdown-subscore">${q.subtotal} / ${q.submax}점</span>
-          </div>${rowsHtml}`;
+
+        const summaryHtml = q.summary
+          ? `<div class="breakdown-summary"><b>총평</b>${escapeHtml(q.summary)}</div>`
+          : "";
+
+        div.innerHTML = `${head}${summaryHtml}${rowsHtml}`;
         box.appendChild(div);
       });
     }
@@ -670,7 +729,8 @@
     answers.forEach((a, idx) => {
       const g = perQuestion?.find((p) => p.questionId === a.questionId);
       lines.push("=".repeat(60));
-      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}${g ? ` — ${g.subtotal}/${g.submax}점` : ""}`);
+      const scoreLabel = !g ? "" : g.hadError ? " — 채점 보류" : ` — ${g.subtotal}/${g.submax}점`;
+      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}${scoreLabel}`);
       lines.push("-".repeat(60));
       lines.push("[사례]");
       lines.push(a.scenario);
@@ -681,11 +741,23 @@
       lines.push("[최종 답안]");
       lines.push(a.answer || "(작성하지 않음)");
       lines.push("");
-      if (g) {
+      if (g && g.hadError) {
         lines.push("[채점 세부내역]");
+        lines.push("AI 채점 서버 오류로 이 문항은 자동 채점되지 않았습니다. 총점에서도 제외되었으니 수동 채점이 필요합니다.");
+        lines.push("");
+      } else if (g) {
+        lines.push("[채점 세부내역]");
+        if (g.summary) {
+          lines.push(`총평: ${g.summary}`);
+          lines.push("");
+        }
         g.criteria.forEach((c) => {
           const isPrivacy = c.key === "deidentification";
-          lines.push(`- ${isPrivacy ? "[개인정보 비식별 처리] " : `[${c.label}] `}${c.score}/${c.max}점 — ${c.reason || ""}`);
+          const name = isPrivacy ? "개인정보 비식별 처리" : c.label;
+          lines.push(`- [${name}] ${c.score}/${c.max}점 (${scoreLevelLabel(c.score)})`);
+          if (c.evidence) lines.push(`  · 확인된 내용: ${c.evidence}`);
+          if (c.missing) lines.push(`  · 미흡한 점: ${c.missing}`);
+          if (c.improve) lines.push(`  · 보완 방법: ${c.improve}`);
         });
         lines.push("");
       }
