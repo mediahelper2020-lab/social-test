@@ -22,6 +22,7 @@
   const screens = {
     start: $("#screen-start"),
     exam: $("#screen-exam"),
+    grading: $("#screen-grading"),
     result: $("#screen-result"),
   };
 
@@ -79,6 +80,12 @@
     });
   }
 
+  function computeExamMinutes(questionCount) {
+    const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
+    const maxMinutes = state.config?.examMaxMinutes || 30;
+    return Math.min(questionCount * minutesPerQ, maxMinutes);
+  }
+
   function selectDomain(domain) {
     state.selectedDomain = domain;
     const info = state.domains.find((d) => d.domain === domain);
@@ -90,9 +97,8 @@
       card.style.borderColor = isSelected ? info.domainColor : "";
     });
 
-    const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
-    const totalMinutes = info.count * minutesPerQ;
-    $("#domain-hint").textContent = `${domain} · 총 ${info.count}문항 · 제한시간 약 ${totalMinutes}분`;
+    const totalMinutes = computeExamMinutes(info.count);
+    $("#domain-hint").textContent = `${domain} · 총 ${info.count}문항 · 제한시간 ${totalMinutes}분`;
 
     $("#btn-start").disabled = false;
   }
@@ -122,8 +128,7 @@
 
       renderNav();
       loadQuestion(0);
-      const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
-      startTimer(state.questions.length * minutesPerQ);
+      startTimer(computeExamMinutes(state.questions.length));
       $("#candidate-info").textContent = `${state.name} · ${state.org} · ${state.selectedDomain}`;
       showScreen("exam");
     } catch (err) {
@@ -324,7 +329,10 @@
       answer: state.answers[q.id] || "",
     }));
 
-    let rubricByQuestion = {};
+    showScreen("grading");
+
+    let overall = null;
+    let perQuestion = null;
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
@@ -333,43 +341,87 @@
           sessionId: state.sessionId,
           name: state.name,
           org: state.org,
+          domain: state.selectedDomain,
           startedAt: state.startedAt,
           answers,
           chatLogs: state.chatLogs,
         }),
       });
       const data = await res.json();
-      if (res.ok) rubricByQuestion = data.rubricByQuestion || {};
+      if (res.ok) {
+        overall = data.overall;
+        perQuestion = data.perQuestion;
+      }
     } catch (err) {
-      // 제출 실패해도 결과 화면은 보여주고 로컬 다운로드는 가능하게 함
+      // 채점 서버 호출이 실패해도 결과 화면은 보여주고 로컬 다운로드는 가능하게 함
     }
 
-    renderResult(answers, rubricByQuestion, auto);
+    renderResult(answers, overall, perQuestion, auto);
     showScreen("result");
   }
 
-  function renderResult(answers, rubricByQuestion, auto) {
-    const box = $("#result-rubric");
-    box.innerHTML = "";
+  function gradeClass(grade) {
+    if (grade.startsWith("A")) return "grade-a";
+    if (grade.startsWith("B")) return "grade-b";
+    if (grade.startsWith("C")) return "grade-c";
+    if (grade.startsWith("D")) return "grade-d";
+    return "grade-f";
+  }
+
+  function renderResult(answers, overall, perQuestion, auto) {
+    const notice = $("#result-notice");
     if (auto) {
-      const notice = document.createElement("p");
-      notice.className = "lead";
+      notice.hidden = false;
       notice.textContent = "제한 시간이 종료되어 자동 제출되었습니다.";
-      box.appendChild(notice);
+    } else {
+      notice.hidden = true;
     }
 
-    answers.forEach((a, idx) => {
-      const rubric = rubricByQuestion[a.questionId];
-      const div = document.createElement("div");
-      div.className = "rubric-item";
-      const rubricHtml = rubric
-        ? `<ul>${rubric.rubric.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
-        : "";
-      div.innerHTML = `<h4>${idx + 1}. [${escapeHtml(a.domain)}] ${escapeHtml(a.title)}</h4>${rubricHtml}`;
-      box.appendChild(div);
-    });
+    const badge = $("#grade-badge");
+    if (overall) {
+      badge.textContent = overall.grade;
+      badge.className = `grade-badge ${gradeClass(overall.grade)}`;
+      $("#score-total-num").textContent = overall.totalScore;
+      $("#score-total-max").textContent = overall.maxScore;
+      $("#score-percentage").textContent = overall.percentage;
+    } else {
+      badge.textContent = "-";
+      badge.className = "grade-badge";
+      $("#score-total-num").textContent = "-";
+      $("#score-total-max").textContent = "-";
+      $("#score-percentage").textContent = "채점 실패";
+    }
 
-    state.reportText = buildReportText(answers);
+    const box = $("#result-breakdown");
+    box.innerHTML = "";
+
+    if (!perQuestion) {
+      const div = document.createElement("div");
+      div.className = "breakdown-item";
+      div.textContent = "채점 서버 응답을 받지 못했습니다. 네트워크 상태를 확인한 뒤 아래에서 답안을 다운로드해 평가자에게 직접 전달해 주세요.";
+      box.appendChild(div);
+    } else {
+      perQuestion.forEach((q, idx) => {
+        const div = document.createElement("div");
+        div.className = "breakdown-item";
+        const rowsHtml = q.criteria
+          .map((c, ci) => {
+            const isPrivacy = ci === q.criteria.length - 1;
+            return `<div class="criterion-row${isPrivacy ? " criterion-privacy" : ""}">
+              <div class="criterion-score">${c.score}/${c.max}</div>
+              <div class="criterion-body"><span class="criterion-label">${escapeHtml(isPrivacy ? "🔒 개인정보 비식별 처리" : `기준 ${ci + 1}`)}</span>${escapeHtml(c.reason || "")}</div>
+            </div>`;
+          })
+          .join("");
+        div.innerHTML = `<div class="breakdown-item-head">
+            <h4>${idx + 1}. [${escapeHtml(q.domain)}] ${escapeHtml(q.title)}</h4>
+            <span class="breakdown-subscore">${q.subtotal} / ${q.submax}점</span>
+          </div>${rowsHtml}`;
+        box.appendChild(div);
+      });
+    }
+
+    state.reportText = buildReportText(answers, overall, perQuestion);
   }
 
   function escapeHtml(str) {
@@ -378,18 +430,22 @@
     return div.innerHTML;
   }
 
-  function buildReportText(answers) {
+  function buildReportText(answers, overall, perQuestion) {
     const lines = [];
     lines.push("사회복지 현장 AI 활용 역량 평가 결과");
     lines.push(`이름: ${state.name}`);
     lines.push(`소속기관/지원분야: ${state.org}`);
     lines.push(`응시 영역: ${state.selectedDomain}`);
     lines.push(`제출 시각: ${new Date().toLocaleString("ko-KR")}`);
+    if (overall) {
+      lines.push(`총점: ${overall.totalScore} / ${overall.maxScore} (${overall.percentage}점, 등급 ${overall.grade})`);
+    }
     lines.push("");
 
     answers.forEach((a, idx) => {
+      const g = perQuestion?.find((p) => p.questionId === a.questionId);
       lines.push("=".repeat(60));
-      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}`);
+      lines.push(`문항 ${idx + 1}. [${a.domain}] ${a.title}${g ? ` — ${g.subtotal}/${g.submax}점` : ""}`);
       lines.push("-".repeat(60));
       lines.push("[사례]");
       lines.push(a.scenario);
@@ -400,6 +456,14 @@
       lines.push("[최종 답안]");
       lines.push(a.answer || "(작성하지 않음)");
       lines.push("");
+      if (g) {
+        lines.push("[채점 세부내역]");
+        g.criteria.forEach((c, ci) => {
+          const isPrivacy = ci === g.criteria.length - 1;
+          lines.push(`- ${isPrivacy ? "[개인정보 비식별 처리] " : ""}${c.score}/${c.max}점 — ${c.reason || ""}`);
+        });
+        lines.push("");
+      }
       lines.push("[AI 대화 기록]");
       const log = state.chatLogs[a.questionId] || [];
       if (log.length === 0) {

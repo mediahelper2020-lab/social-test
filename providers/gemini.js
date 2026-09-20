@@ -51,4 +51,98 @@ async function chat({ systemPrompt, history, message }) {
   return candidate?.finishReason === "MAX_TOKENS" ? `${text}\n\n(...응답 길이 제한으로 일부 생략됨)` : text;
 }
 
-module.exports = { chat };
+function buildGradingPrompt({ scenario, task, criteria, answer }) {
+  const criteriaList = criteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
+  return `당신은 사회복지 현장 AI 활용 역량 평가의 엄격하지만 공정한 채점위원입니다.
+
+[사례]
+${scenario}
+
+[과업]
+${task}
+
+[응시자 최종 답안]
+${answer}
+
+아래 ${criteria.length}개의 평가기준 각각에 대해 0~5점(정수)으로 채점하세요.
+${criteriaList}
+
+채점 기준 가이드:
+- 5점: 기준을 충실하고 구체적으로 충족함
+- 3~4점: 부분적으로 충족했으나 구체성/근거가 보완 필요함
+- 1~2점: 형식적으로만 언급했거나 미흡함
+- 0점: 전혀 다루지 않음 (답안이 비어 있거나 무관한 내용인 경우도 0점)
+
+반드시 아래 JSON 형식으로만, 다른 설명 없이 응답하세요:
+{"scores": [정수, 정수, ...], "reasons": ["한 문장 이유", "한 문장 이유", ...]}
+scores와 reasons 배열의 길이는 반드시 ${criteria.length}이어야 하며, 순서는 위 평가기준 순서와 동일해야 합니다.`;
+}
+
+function clampScore(n) {
+  const num = Math.round(Number(n));
+  if (!Number.isFinite(num)) return 0;
+  return Math.min(5, Math.max(0, num));
+}
+
+function parseGradingJson(text, count) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        // fall through, handled below
+      }
+    }
+  }
+  if (!parsed || !Array.isArray(parsed.scores)) {
+    throw new Error("채점 응답을 JSON으로 해석하지 못했습니다.");
+  }
+  const scores = Array.from({ length: count }, (_, i) => clampScore(parsed.scores[i]));
+  const reasons = Array.from({ length: count }, (_, i) =>
+    String(parsed.reasons?.[i] ?? "").slice(0, 300)
+  );
+  return { scores, reasons };
+}
+
+// criteria: string[] (평가기준 문구 배열) / answer: 응시자 답안 텍스트
+// 반환: { scores: number[](0~5), reasons: string[] } (criteria와 같은 길이/순서)
+async function grade({ scenario, task, criteria, answer }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY가 설정되어 있지 않습니다. .env 파일을 확인하세요.");
+  }
+
+  const prompt = buildGradingPrompt({ scenario, task, criteria, answer });
+
+  const res = await fetch(`${ENDPOINT}?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 1200,
+        thinkingConfig: { thinkingBudget: 0 },
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Gemini 채점 API 오류 (${res.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+  if (!text) {
+    throw new Error("채점 응답이 비어 있습니다.");
+  }
+  return parseGradingJson(text, criteria.length);
+}
+
+module.exports = { chat, grade };

@@ -99,13 +99,32 @@
   </div>
 </section>
 
+<!-- 채점 중 화면 -->
+<section id="screen-grading" class="screen">
+  <div class="grading-card">
+    <div class="spinner"></div>
+    <h2>AI가 답안을 채점하고 있습니다...</h2>
+    <p class="lead">문항별 평가기준에 따라 세부 점수를 산정하는 중입니다. 잠시만 기다려 주세요.</p>
+  </div>
+</section>
+
 <!-- 결과 화면 -->
 <section id="screen-result" class="screen">
   <div class="result-card">
-    <h1>제출 완료</h1>
-    <p class="lead">수고하셨습니다. 아래는 문항별 평가 관점(자기 점검용)입니다. 제출된 답안과 AI 대화 기록은 평가자에게 함께 전달됩니다.</p>
-    <div id="result-rubric" class="result-rubric"></div>
-    <button id="btn-download" class="btn-primary">답안 + 대화기록 다운로드 (.txt)</button>
+    <h1>채점 결과</h1>
+    <p class="lead" id="result-notice" hidden></p>
+
+    <div class="score-summary">
+      <div id="grade-badge" class="grade-badge">-</div>
+      <div class="score-summary-text">
+        <div class="score-total"><span id="score-total-num">0</span> / <span id="score-total-max">0</span>점</div>
+        <div class="score-percentage"><span id="score-percentage">0</span>점 (100점 환산)</div>
+      </div>
+    </div>
+
+    <p class="lead" style="margin-top:18px;">문항별 평가기준(개인정보 비식별 처리 포함)에 따른 세부 채점 결과입니다. 제출된 답안과 AI 대화 기록은 평가자에게 함께 전달됩니다.</p>
+    <div id="result-breakdown" class="result-breakdown"></div>
+    <button id="btn-download" class="btn-primary">답안 + 채점결과 + 대화기록 다운로드 (.txt)</button>
   </div>
 </section>
 
