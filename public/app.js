@@ -439,19 +439,31 @@
       return;
     }
 
+    const fills = [];
     byCompetency.forEach((c) => {
       const row = document.createElement("div");
       row.className = "bar-row";
       row.innerHTML = `
         <div class="bar-row-label">${escapeHtml(c.label)}</div>
-        <div class="bar-row-track"><div class="bar-row-fill" style="width:${c.percentage}%"></div></div>
+        <div class="bar-row-track"><div class="bar-row-fill" style="width:0%"></div></div>
         <div class="bar-row-value">${c.percentage}</div>
       `;
       chart.appendChild(row);
+      fills.push({ el: row.querySelector(".bar-row-fill"), percentage: c.percentage });
 
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${escapeHtml(c.label)}</td><td>${c.percentage} / 100</td>`;
       tableBody.appendChild(tr);
+    });
+
+    // 바가 0%에서 목표치까지 자라나는 애니메이션이 실행되도록, 삽입 직후가 아니라
+    // 한 프레임 뒤에 목표 너비를 지정한다(같은 프레임에 지정하면 트랜지션 없이 바로 채워짐).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        fills.forEach(({ el, percentage }) => {
+          el.style.width = `${percentage}%`;
+        });
+      });
     });
   }
 
