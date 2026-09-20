@@ -31,7 +31,8 @@ async function chat({ systemPrompt, history, message }) {
       model: MODEL,
       messages,
       temperature: 0.6,
-      max_tokens: 800,
+      // 안내문·기획서 초안을 통째로 써 달라는 요청이 들어오므로 넉넉히 잡는다.
+      max_tokens: 3000,
     }),
   });
 

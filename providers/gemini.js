@@ -121,7 +121,8 @@ async function chat({ systemPrompt, history, message }) {
       contents,
       generationConfig: {
         temperature: 0.6,
-        maxOutputTokens: 1024,
+        // 안내문·기획서 초안을 통째로 써 달라는 요청이 들어오므로 넉넉히 잡는다.
+        maxOutputTokens: 3000,
         // gemini-2.5 계열은 기본적으로 내부 추론(thinking)에 출력 토큰 예산을 많이 소모해
         // 실제 답변이 중간에 잘리는 문제가 있어, 시험용 채팅 응답에서는 thinking을 끈다.
         thinkingConfig: { thinkingBudget: 0 },

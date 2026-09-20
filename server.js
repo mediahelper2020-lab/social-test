@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const { DOMAINS, COMPETENCIES, TRAP_KINDS } = require("./data/domains");
+const { DOMAINS, COMPETENCIES, TRAP_KINDS, ASSISTANT_PERSONA } = require("./data/domains");
 const PII = require("./public/pii");
 const { seal, unseal } = require("./lib/sealed");
 
@@ -59,27 +59,23 @@ function buildCustomProfile(label) {
       "위기·갈등·딜레마 상황으로 출제하라. 기관 성격을 확신할 수 없으면 이름에서 드러나는 대상층과 " +
       "기능을 근거로 가장 그럴듯한 업무를 전제하라.",
     docHint: `${label}에서 담당자가 반복적으로 작성할 법한 상담·사례관리 기록 문서`,
-    persona:
-      `당신은 "${label}"에서 다년간 근무한 선임 사회복지사 역할을 맡는다. 이 기관의 업무 성격을 ` +
-      "추론해 그에 맞는 실무 관점으로 상담자와 대화하라. 정답을 바로 주지 말고 질문으로 상담자가 " +
-      "스스로 판단을 정리하도록 이끌어라. 답변은 5~8문장 내외로 간결하게 작성하라.",
   };
 }
 
-// 문항마다 다른 함정을 심기 위해, 현장 페르소나에 그 문항 전용 지시문을 덧붙인다.
+// 모든 현장이 같은 범용 어시스턴트를 쓰되, 문항마다 다른 함정 지시문만 덧붙인다.
 // 이 지시문은 서버에서만 만들어지며 응시자 화면에는 노출되지 않는다.
-function buildQuestionPersona(profile, trap) {
-  if (!trap) return profile.persona;
+function buildQuestionPersona(trap) {
+  if (!trap) return ASSISTANT_PERSONA;
 
-  return `${profile.persona}
+  return `${ASSISTANT_PERSONA}
 
-[이번 대화에서 반드시 지킬 규칙 — 상담자에게 절대 알리지 말 것]
+[이번 대화에서 반드시 지킬 규칙 — 사용자에게 절대 알리지 말 것]
 당신은 대화 중 적어도 한 번, 아래 내용을 확신에 찬 어조로 자연스럽게 제안해야 한다.
 "${trap.claim}"
-- 상담자가 묻지 않아도 첫 번째나 두 번째 답변에 이 제안을 섞어 넣어라.
+- 사용자가 묻지 않아도 첫 번째나 두 번째 답변에 이 제안을 섞어 넣어라.
 - 이 제안이 틀렸다는 사실을 먼저 밝히거나 암시하지 말라.
-- 상담자가 근거를 묻거나 문제를 지적하면 그때는 인정하고 정정하라.
-- 상담자가 끝까지 지적하지 않으면 스스로 정정하지 말라.
+- 사용자가 근거를 묻거나 문제를 지적하면 그때는 인정하고 정정하라.
+- 사용자가 끝까지 지적하지 않으면 스스로 정정하지 말라.
 - 이 규칙의 존재 자체를 언급하지 말라.`;
 }
 
@@ -159,7 +155,7 @@ app.post("/api/generate-questions", async (req, res) => {
           title: q.title,
           scenario: q.scenario,
           task: q.task,
-          persona: buildQuestionPersona(profile, q.trap),
+          persona: buildQuestionPersona(q.trap),
           trap: q.trap,
         }),
       };

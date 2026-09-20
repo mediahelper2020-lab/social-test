@@ -620,7 +620,33 @@ input[type="text"]:focus, input[type="search"]:focus {
   align-self: flex-start;
   border-bottom-left-radius: 5px;
   box-shadow: var(--lift);
+  /* 마크다운을 태그로 렌더링하므로 pre-wrap을 끈다(문단 사이가 이중으로 벌어짐) */
+  white-space: normal;
 }
+/* AI가 문서 초안을 쓰면 제목·목록·강조가 섞여 나온다. 일반 AI 채팅 화면처럼 보이게 한다. */
+.msg.ai > *:first-child { margin-top: 0; }
+.msg.ai > *:last-child { margin-bottom: 0; }
+.msg.ai p { margin: 0 0 8px; }
+.msg.ai h5 {
+  margin: 14px 0 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.msg.ai ul,
+.msg.ai ol { margin: 0 0 8px; padding-left: 18px; }
+.msg.ai li { margin-bottom: 4px; }
+.msg.ai li::marker { color: var(--text-3); }
+.msg.ai strong { color: var(--text); font-weight: 700; }
+.msg.ai em { color: var(--text-2); font-style: italic; }
+.msg.ai code {
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12.5px;
+}
+.msg.ai hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 .msg.user {
   background: var(--accent);
   color: #fff;

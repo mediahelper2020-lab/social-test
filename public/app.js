@@ -417,9 +417,10 @@
       empty.className = "ai-empty";
       empty.innerHTML = `
         <div class="ai-empty-mark">AI</div>
-        <h4>이 사례를 함께 풀어볼 수 있습니다</h4>
-        <p>AI는 답을 대신 정해주지 않고, 현장 전문가처럼 질문을 던지며 생각을 정리해 줍니다.
-        어떻게 질문하는지도 평가에 반영됩니다.</p>
+        <h4>업무를 시켜 보세요</h4>
+        <p>실제 업무에서 쓰는 AI와 같습니다. 시킨 일을 그대로 해줄 뿐,
+        먼저 묻거나 방향을 잡아주지 않습니다. 맥락과 조건을 얼마나 정확히 전달하는지가
+        그대로 평가에 반영됩니다.</p>
       `;
       box.appendChild(empty);
     } else {
@@ -428,12 +429,69 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  // AI가 문서 초안을 쓰면서 마크다운을 그대로 내보내므로, 일반적인 AI 채팅 화면처럼 렌더링한다.
+  // 모델 출력은 신뢰할 수 없는 문자열이므로 반드시 escapeHtml으로 먼저 무력화한 뒤 서식만 되살린다.
+  function renderMarkdown(text) {
+    const lines = escapeHtml(text).split("\n");
+    const out = [];
+    let listType = null;
+
+    const closeList = () => {
+      if (listType) out.push(`</${listType}>`);
+      listType = null;
+    };
+    const openList = (type) => {
+      if (listType !== type) {
+        closeList();
+        out.push(`<${type}>`);
+        listType = type;
+      }
+    };
+
+    lines.forEach((raw) => {
+      const line = raw.trimEnd();
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+      const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+
+      if (heading) {
+        closeList();
+        out.push(`<h5>${inlineMarkdown(heading[2])}</h5>`);
+      } else if (bullet) {
+        openList("ul");
+        out.push(`<li>${inlineMarkdown(bullet[1])}</li>`);
+      } else if (numbered) {
+        openList("ol");
+        out.push(`<li>${inlineMarkdown(numbered[1])}</li>`);
+      } else if (!line.trim()) {
+        closeList();
+      } else if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+        closeList();
+        out.push("<hr />");
+      } else {
+        closeList();
+        out.push(`<p>${inlineMarkdown(line)}</p>`);
+      }
+    });
+    closeList();
+    return out.join("");
+  }
+
+  function inlineMarkdown(text) {
+    return text
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  }
+
   function appendMessageEl(role, text) {
     const box = $("#ai-messages");
     box.querySelector(".ai-empty")?.remove();
     const el = document.createElement("div");
     el.className = `msg ${role}`;
-    el.textContent = text;
+    // 응시자가 친 글과 오류 안내는 그대로, AI 답변만 서식을 살린다.
+    if (role === "ai") el.innerHTML = renderMarkdown(text);
+    else el.textContent = text;
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
     return el;
