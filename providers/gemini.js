@@ -215,11 +215,23 @@ ${docHint}
 questions 배열의 길이는 반드시 3이어야 하며, 순서대로 문항 1, 2, 3입니다.`;
 }
 
+// 모델이 배열을 바로 주거나 키 이름을 다르게 쓰는 경우까지 받아준다.
+function pickQuestionArray(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return null;
+  for (const key of ["questions", "items", "data", "문항"]) {
+    if (Array.isArray(parsed[key])) return parsed[key];
+  }
+  const firstArray = Object.values(parsed).find((v) => Array.isArray(v));
+  return firstArray || null;
+}
+
 function validateGeneratedQuestions(parsed) {
-  if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length !== 3) {
+  const arr = pickQuestionArray(parsed);
+  if (!arr || arr.length < 3) {
     throw new Error("출제 응답 형식이 올바르지 않습니다.");
   }
-  return parsed.questions.map((q, i) => {
+  return arr.slice(0, 3).map((q, i) => {
     const title = String(q?.title || "").trim().slice(0, 80);
     const scenario = String(q?.scenario || "").trim().slice(0, 4000);
     const task = String(q?.task || "").trim().slice(0, 2000);
@@ -249,6 +261,27 @@ async function generateQuestions({ label, brief, docHint }) {
         maxOutputTokens: 3500,
         thinkingConfig: { thinkingBudget: 0 },
         responseMimeType: "application/json",
+        // 스키마를 함께 넘기면 모델이 구조를 지키도록 강제된다(작은 모델일수록 효과가 크다).
+        responseSchema: {
+          type: "object",
+          properties: {
+            questions: {
+              type: "array",
+              minItems: 3,
+              maxItems: 3,
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  scenario: { type: "string" },
+                  task: { type: "string" },
+                },
+                required: ["title", "scenario", "task"],
+              },
+            },
+          },
+          required: ["questions"],
+        },
       },
     }),
   });

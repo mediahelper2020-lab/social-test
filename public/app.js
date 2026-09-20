@@ -77,18 +77,44 @@
     }
   }
 
-  function renderDomainPicker() {
+  function renderDomainPicker(filter = "") {
     const picker = $("#domain-picker");
+    const needle = filter.trim();
+    const list = needle ? state.domains.filter((d) => d.label.includes(needle)) : state.domains;
+
     picker.innerHTML = "";
-    state.domains.forEach((d) => {
-      const card = document.createElement("div");
+    if (list.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "domain-hint";
+      empty.textContent = "검색 결과가 없습니다.";
+      picker.appendChild(empty);
+      return;
+    }
+
+    list.forEach((d, i) => {
+      const card = document.createElement("button");
+      card.type = "button";
       card.className = "domain-card";
-      card.textContent = d.label;
       card.dataset.key = d.key;
+      card.style.setProperty("--dot", d.color);
+      card.style.animationDelay = `${Math.min(i, 12) * 22}ms`;
+      card.innerHTML = `<i></i><span></span>`;
+      card.querySelector("span").textContent = d.label;
       card.addEventListener("click", () => selectDomain(d));
       picker.appendChild(card);
     });
+    refreshDomainSelection();
   }
+
+  function refreshDomainSelection() {
+    document.querySelectorAll(".domain-card").forEach((card) => {
+      card.classList.toggle("selected", !!state.selectedDomain && card.dataset.key === state.selectedDomain.key);
+    });
+  }
+
+  $("#domain-search").addEventListener("input", (e) => {
+    renderDomainPicker(e.target.value);
+  });
 
   function computeExamMinutes(questionCount) {
     const minutesPerQ = state.config?.examMinutesPerQuestion || 12;
@@ -98,16 +124,12 @@
 
   function selectDomain(domain) {
     state.selectedDomain = domain;
-
-    document.querySelectorAll(".domain-card").forEach((card) => {
-      const isSelected = card.dataset.key === domain.key;
-      card.classList.toggle("selected", isSelected);
-      card.style.background = isSelected ? domain.color : "";
-      card.style.borderColor = isSelected ? domain.color : "";
-    });
+    refreshDomainSelection();
 
     const totalMinutes = computeExamMinutes(3);
-    $("#domain-hint").textContent = `${domain.label} · 총 3문항(AI 실시간 출제) · 제한시간 ${totalMinutes}분`;
+    const hint = $("#domain-hint");
+    hint.textContent = `${domain.label} · 총 3문항(AI 실시간 출제) · 제한시간 ${totalMinutes}분`;
+    hint.classList.add("on");
 
     $("#btn-start").disabled = false;
   }
@@ -279,12 +301,22 @@
 
   function refreshNavState() {
     const items = document.querySelectorAll(".q-nav-item");
+    let answeredCount = 0;
     items.forEach((item, idx) => {
       const q = state.questions[idx];
       item.classList.toggle("active", idx === state.currentIndex);
       const answered = (state.answers[q.id] || "").trim().length > 0;
+      if (answered) answeredCount += 1;
       item.classList.toggle("answered", answered);
     });
+
+    const total = state.questions.length || 1;
+    $("#progress-fill").style.width = `${Math.round((answeredCount / total) * 100)}%`;
+  }
+
+  function updateCharCount() {
+    const len = $("#q-answer").value.trim().length;
+    $("#char-count").textContent = `${len.toLocaleString("ko-KR")}자`;
   }
 
   function loadQuestion(idx) {
@@ -302,6 +334,7 @@
     $("#q-scenario").textContent = q.scenario;
     $("#q-task").textContent = q.task;
     $("#q-answer").value = state.answers[q.id] || "";
+    $("#q-counter").textContent = `문항 ${idx + 1} / ${state.questions.length}`;
 
     $("#btn-prev").disabled = idx === 0;
     $("#btn-next").disabled = idx === state.questions.length - 1;
@@ -309,6 +342,9 @@
     renderChatMessages(q.id);
     refreshNavState();
     updateRemainingBadge();
+    updateCharCount();
+    // 문항을 바꾸면 본문 맨 위부터 읽도록 스크롤을 되돌린다.
+    document.querySelector(".q-main")?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function saveCurrentAnswer() {
@@ -321,6 +357,7 @@
   $("#q-answer").addEventListener("input", () => {
     saveCurrentAnswer();
     refreshNavState();
+    updateCharCount();
   });
 
   $("#btn-prev").addEventListener("click", () => {
@@ -335,7 +372,15 @@
     box.innerHTML = "";
     const log = state.chatLogs[questionId] || [];
     if (log.length === 0) {
-      appendMessageEl("system", "이 사례에 대해 AI와 자유롭게 논의해 보세요. AI는 답을 대신 정해주지 않고, 함께 생각을 정리해 줍니다.");
+      const empty = document.createElement("div");
+      empty.className = "ai-empty";
+      empty.innerHTML = `
+        <div class="ai-empty-mark">AI</div>
+        <h4>이 사례를 함께 풀어볼 수 있습니다</h4>
+        <p>AI는 답을 대신 정해주지 않고, 현장 전문가처럼 질문을 던지며 생각을 정리해 줍니다.
+        어떻게 질문하는지도 평가에 반영됩니다.</p>
+      `;
+      box.appendChild(empty);
     } else {
       log.forEach((turn) => appendMessageEl(turn.role, turn.text));
     }
@@ -344,6 +389,7 @@
 
   function appendMessageEl(role, text) {
     const box = $("#ai-messages");
+    box.querySelector(".ai-empty")?.remove();
     const el = document.createElement("div");
     el.className = `msg ${role}`;
     el.textContent = text;
@@ -409,6 +455,14 @@
       appendMessageEl("error", "네트워크 오류로 AI 응답을 받지 못했습니다.");
     } finally {
       sendBtn.disabled = false;
+    }
+  });
+
+  // Enter로 바로 전송, Shift+Enter는 줄바꿈 (일반적인 채팅 UI와 동일하게)
+  $("#ai-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      $("#ai-form").requestSubmit();
     }
   });
 

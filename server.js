@@ -62,13 +62,20 @@ app.post("/api/generate-questions", async (req, res) => {
       return res.status(400).json({ error: "존재하지 않는 현장입니다." });
     }
 
+    // 일시적인 과부하(503)나 형식 오류가 드물게 나므로 짧은 대기와 함께 몇 번 재시도한다.
     let generated;
-    try {
-      generated = await provider.generateQuestions(profile);
-    } catch (firstErr) {
-      console.warn("[/api/generate-questions] 1차 시도 실패, 재시도:", firstErr.message);
-      generated = await provider.generateQuestions(profile); // 한 번 재시도
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        generated = await provider.generateQuestions(profile);
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn(`[/api/generate-questions] ${attempt}차 시도 실패:`, err.message);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 800));
+      }
     }
+    if (!generated) throw lastErr;
 
     const questions = generated.map((q, i) => ({
       id: `${profile.key}-${i + 1}`,
